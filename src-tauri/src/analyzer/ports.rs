@@ -22,6 +22,10 @@ pub struct ScanResult {
     pub latency_ms: u64,
 }
 
+pub fn get_port_list() -> Vec<u16> {
+    COMMON_PORTS.to_vec()
+}
+
 pub fn get_listening_ports() -> Result<Vec<ListeningPort>, String> {
     let (cmd, args): (&str, Vec<&str>) = if cfg!(target_os = "windows") {
         ("netstat", vec!["-ano"])
@@ -91,10 +95,6 @@ fn parse_listening_ports(output: &str) -> Result<Vec<ListeningPort>, String> {
     ports.dedup_by_key(|p| p.port);
 
     Ok(ports)
-}
-
-pub fn scan_common_ports(host: &str, timeout_ms: u64) -> Vec<ScanResult> {
-    scan_ports(host, COMMON_PORTS, timeout_ms)
 }
 
 pub fn scan_ports(host: &str, ports: &[u16], timeout_ms: u64) -> Vec<ScanResult> {

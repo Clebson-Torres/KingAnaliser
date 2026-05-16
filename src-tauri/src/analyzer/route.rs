@@ -1,4 +1,5 @@
 use serde::Serialize;
+use regex::Regex;
 
 #[derive(Debug, Serialize)]
 pub struct Hop {
@@ -12,10 +13,10 @@ pub struct PingResult {
     pub host: String,
     pub transmitted: u32,
     pub received: u32,
-    pub loss_pct: f64,
-    pub min_ms: f64,
-    pub avg_ms: f64,
-    pub max_ms: f64,
+    pub loss_pct: u8,
+    pub min_ms: f32,
+    pub avg_ms: f32,
+    pub max_ms: f32,
 }
 
 const MAX_HOPS: u32 = 30;
@@ -66,7 +67,7 @@ fn trace_route_tracepath(host: &str) -> Result<Vec<Hop>, String> {
     parse_tracepath_output(&stdout)
 }
 
-fn parse_traceroute_output(output: &str) -> Result<Vec<Hop>, String> {
+pub fn parse_traceroute_output(output: &str) -> Result<Vec<Hop>, String> {
     let mut hops = Vec::new();
 
     for line in output.lines() {
@@ -134,37 +135,37 @@ fn parse_tracert_output(output: &str) -> Result<Vec<Hop>, String> {
     }
 }
 
-fn parse_tracepath_output(output: &str) -> Result<Vec<Hop>, String> {
+pub fn parse_tracepath_output(output: &str) -> Result<Vec<Hop>, String> {
+    let re = Regex::new(r"^\s*(\d+)\??:\s+(.+?)(?:\s+(\d+\.\d+ms|no reply))?\s*$").unwrap();
     let mut hops = Vec::new();
 
     for line in output.lines() {
         let line = line.trim();
-        if line.is_empty() {
+        if line.is_empty() || line.contains("pmtu") || line.contains("too big") {
             continue;
         }
-        if line.contains("pmtu") || line.contains("too big") {
-            continue;
-        }
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let first = parts[0].trim_end_matches(':').trim_end_matches('?');
-            if let Ok(num) = first.parse::<u32>() {
-                let addr = parts[1].trim_end_matches(':');
-                let lat = if parts.len() >= 3 {
-                    parts[2].to_string()
-                } else {
-                    "?".to_string()
-                };
-                hops.push(Hop {
-                    hop_number: num,
-                    address: if addr.starts_with("LOCAL") || addr.starts_with('[') {
-                        format!("local ({})", addr.trim_matches(|c| c == '[' || c == ']'))
-                    } else {
-                        addr.to_string()
-                    },
-                    latency_ms: lat,
-                });
-            }
+
+        if let Some(caps) = re.captures(line) {
+            let hop_num: u32 = caps[1].parse().unwrap_or(0);
+            let addr_raw = caps[2].trim();
+            let addr = if addr_raw == "no reply" {
+                "*".to_string()
+            } else if addr_raw.starts_with("LOCAL") || addr_raw.starts_with('[') {
+                format!("local ({})", addr_raw.trim_matches(|c| c == '[' || c == ']'))
+            } else {
+                addr_raw.to_string()
+            };
+
+            let latency = caps.get(3).map_or("?", |m| {
+                let val = m.as_str();
+                if val == "no reply" { "?" } else { val }
+            });
+
+            hops.push(Hop {
+                hop_number: hop_num,
+                address: addr,
+                latency_ms: latency.to_string(),
+            });
         }
     }
 
@@ -198,88 +199,34 @@ pub fn ping_host(host: &str, count: u32) -> Result<PingResult, String> {
     parse_ping_output(&stdout, count)
 }
 
-fn parse_ping_output(output: &str, count: u32) -> Result<PingResult, String> {
-    let transmitted = count;
-    let mut received: u32 = 0;
-    let mut min_ms: f64 = 0.0;
-    let mut avg_ms: f64 = 0.0;
-    let mut max_ms: f64 = 0.0;
+pub fn parse_ping_output(output: &str, count: u32) -> Result<PingResult, String> {
+    let re_loss = Regex::new(r"(\d+)\s*%\s*(packet loss|perda de pacotes)").unwrap();
+    let re_rtt = Regex::new(r"([\d.]+)/([\d.]+)/([\d.]+)").unwrap();
 
-    if cfg!(target_os = "windows") {
-        for line in output.lines() {
-            if line.contains("perdidos") || line.contains("lost") {
-                let parts: Vec<&str> = line.split(',').collect();
-                for part in &parts {
-                    let part = part.trim();
-                    if part.contains("perdidos") || part.contains("lost") {
-                        if let Some(num_str) = part.split_whitespace().next() {
-                            if let Ok(lost) = num_str.parse::<u32>() {
-                                received = count.saturating_sub(lost);
-                            }
-                        }
-                    }
-                }
-            }
-            if line.contains("ms") && (line.contains("Mínimo") || line.contains("Minimum")) {
-                let nums: Vec<f64> = line
-                    .split(|c: char| !c.is_ascii_digit() && c != '.')
-                    .filter_map(|s| s.parse::<f64>().ok())
-                    .collect();
-                if nums.len() >= 3 {
-                    min_ms = nums[0];
-                    max_ms = nums[1];
-                    avg_ms = nums[2];
-                }
-            }
+    let mut received: u32 = count;
+    let mut loss_pct: u8 = 0;
+    let mut min_ms: f32 = 0.0;
+    let mut avg_ms: f32 = 0.0;
+    let mut max_ms: f32 = 0.0;
+
+    for line in output.lines() {
+        if let Some(caps) = re_loss.captures(line) {
+            loss_pct = caps[1].parse().unwrap_or(0);
+            received = count.saturating_sub((loss_pct as f32 / 100.0 * count as f32).round() as u32);
         }
-    } else {
-        for line in output.lines() {
-            if line.contains("received") || line.contains("recebidas") {
-                let parts: Vec<&str> = line.split(',').collect();
-                for part in &parts {
-                    let part = part.trim();
-                    if part.contains("received") || part.contains("recebidas") {
-                        if let Some(num_str) = part.split_whitespace().next() {
-                            if let Ok(recv) = num_str.parse::<u32>() {
-                                received = recv;
-                            }
-                        }
-                    }
-                }
-            }
-            if line.starts_with("rtt ") || line.starts_with("estat") {
-                let nums: Vec<f64> = line
-                    .split('/')
-                    .filter_map(|s| {
-                        let s = s.trim();
-                        let num: String = s.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
-                        if !num.is_empty() {
-                            num.parse::<f64>().ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                if nums.len() >= 3 {
-                    min_ms = nums[0];
-                    avg_ms = nums[1];
-                    max_ms = nums[2];
-                }
-            }
+
+        if let Some(caps) = re_rtt.captures(line) {
+            min_ms = caps[1].parse().unwrap_or(0.0);
+            avg_ms = caps[2].parse().unwrap_or(0.0);
+            max_ms = caps[3].parse().unwrap_or(0.0);
         }
     }
-
-    let loss_pct = if transmitted > 0 {
-        ((transmitted.saturating_sub(received)) as f64 / transmitted as f64) * 100.0
-    } else {
-        0.0
-    };
 
     let host = extract_host(output);
 
     Ok(PingResult {
         host,
-        transmitted,
+        transmitted: count,
         received,
         loss_pct,
         min_ms,
@@ -302,4 +249,9 @@ fn extract_host(output: &str) -> String {
     String::new()
 }
 
-
+pub fn classify_latency(ms: f32) -> &'static str {
+    if ms < 5.0 { "Excelente" }
+    else if ms < 30.0 { "Bom" }
+    else if ms < 80.0 { "Aceitável" }
+    else { "Ruim" }
+}

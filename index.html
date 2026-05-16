@@ -3,18 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Analisador de Rede</title>
+    <title>King Analiser</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <div id="app">
       <header>
-        <h1>Analisador de Rede</h1>
-        <p class="subtitle">Ferramenta de diagnóstico de rede completa</p>
+        <h1>King Analiser</h1>
+        <p class="subtitle">Ferramenta completa de diagnóstico de rede</p>
       </header>
 
       <main>
         <section class="controls">
+          <div class="control-group">
+            <h2>Interface de Rede</h2>
+            <select id="iface-select" class="iface-select">
+              <option value="">Carregando interfaces...</option>
+            </select>
+          </div>
+
           <div class="control-group">
             <h2>Testes de IP</h2>
             <button id="btn-local-ip" class="btn">IP Local</button>
@@ -31,6 +38,7 @@
                 value="google.com"
               />
               <button id="btn-dns" class="btn">DNS Lookup</button>
+              <button id="btn-dns-bench" class="btn">DNS Benchmark</button>
             </div>
           </div>
 
@@ -49,9 +57,24 @@
           </div>
 
           <div class="control-group">
+            <h2>Gateway</h2>
+            <button id="btn-gateway" class="btn">Info do Gateway</button>
+          </div>
+
+          <div class="control-group">
+            <h2>HTTP Timing</h2>
+            <button id="btn-http" class="btn">Testar HTTP</button>
+          </div>
+
+          <div class="control-group">
             <h2>Portas</h2>
             <button id="btn-listening" class="btn">Portas em Escuta</button>
             <button id="btn-scan" class="btn">Scan de Portas</button>
+          </div>
+
+          <div class="control-group">
+            <h2>Estatísticas</h2>
+            <button id="btn-iface-stats" class="btn">Stats de Interface</button>
           </div>
 
           <div class="control-group full-report">
@@ -70,13 +93,13 @@
           <div class="output-header">
             <h2>Resultados</h2>
             <button id="btn-export" class="btn btn-sm" title="Exportar relatório">
-              💾 Exportar
+              &#x1F4BE; Exportar
             </button>
             <button id="btn-copy" class="btn btn-sm" title="Copiar tudo">
-              📋 Copiar
+              &#x1F4CB; Copiar
             </button>
             <button id="btn-clear" class="btn btn-sm" title="Limpar">
-              🗑️ Limpar
+              &#x1F5D1;&#xFE0F; Limpar
             </button>
           </div>
           <pre id="output-content"></pre>

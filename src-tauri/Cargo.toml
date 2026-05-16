@@ -21,3 +21,6 @@ local-ip-address = "0.6"
 tokio = { version = "1", features = ["rt"] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-fs = "2.5.1"
+chrono = "0.4"
+regex = "1"
+curl = "0.4"
