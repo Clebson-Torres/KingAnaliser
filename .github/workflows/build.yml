@@ -1,4 +1,4 @@
-name: Build — Analisador de Rede
+name: Build — KingAnaliser
 
 on:
   push:
@@ -37,7 +37,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: analisador-de-rede/package-lock.json
 
       - name: Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -47,10 +46,9 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: analisador-de-rede/src-tauri
+          workspaces: src-tauri
 
       - name: npm install
-        working-directory: analisador-de-rede
         run: npm install
 
       - name: Build (Tauri)
@@ -58,16 +56,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: analisador-de-rede
           tagName: ${{ github.ref_name }}
-          releaseName: 'Analisador de Rede ${{ github.ref_name }}'
+          releaseName: 'KingAnaliser ${{ github.ref_name }}'
           releaseBody: 'Build automático — ${{ github.ref_name }}'
           releaseDraft: false
           prerelease: false
           args: --target x86_64-unknown-linux-gnu
 
   # ──────────────────────────────────────────
-  # Windows — NSIS installer (.exe)
+  # Windows — NSIS installer (.exe) + MSI
   # ──────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
@@ -81,7 +78,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: analisador-de-rede/package-lock.json
 
       - name: Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -91,10 +87,9 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: analisador-de-rede/src-tauri
+          workspaces: src-tauri
 
       - name: npm install
-        working-directory: analisador-de-rede
         run: npm install
 
       - name: Build (Tauri)
@@ -102,9 +97,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: analisador-de-rede
           tagName: ${{ github.ref_name }}
-          releaseName: 'Analisador de Rede ${{ github.ref_name }}'
+          releaseName: 'KingAnaliser ${{ github.ref_name }}'
           releaseBody: 'Build automático — ${{ github.ref_name }}'
           releaseDraft: false
           prerelease: false
