@@ -7,4 +7,6 @@ pub mod gateway;
 pub mod dns_bench;
 pub mod http_timing;
 pub mod iface_stats;
+pub mod mtr;
+pub mod quality;
 pub mod tests;

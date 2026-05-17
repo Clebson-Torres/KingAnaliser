@@ -1,4 +1,4 @@
-use crate::analyzer::{dns, gateway, dns_bench, http_timing, iface_stats, ip, ports, route, report};
+use crate::analyzer::{dns, dns_bench, gateway, http_timing, iface_stats, ip, mtr, ports, quality, route, report};
 
 #[tauri::command]
 pub async fn get_local_ip() -> Result<Vec<ip::InterfaceInfo>, String> {
@@ -76,10 +76,22 @@ pub async fn benchmark_dns() -> Vec<dns_bench::DnsServer> {
 }
 
 #[tauri::command]
-pub async fn test_http_timing(url: String) -> Result<http_timing::HttpTiming, String> {
-    tokio::task::spawn_blocking(move || http_timing::test_http_timing(&url))
+pub async fn test_http_timing(urls: Vec<String>) -> Vec<http_timing::HttpTiming> {
+    tokio::task::spawn_blocking(move || {
+        urls.iter()
+            .map(|url| http_timing::test_http_timing(url).unwrap_or_else(|_e| http_timing::HttpTiming {
+                url: url.clone(),
+                dns_ms: 0.0,
+                connect_ms: 0.0,
+                ttfb_ms: 0.0,
+                total_ms: 0.0,
+                status_code: 0,
+                quality: "error".to_string(),
+            }))
+            .collect()
+    })
         .await
-        .map_err(|e| format!("Erro interno: {}", e))?
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -92,6 +104,18 @@ pub async fn get_interface_stats() -> Result<Vec<iface_stats::IfaceStats>, Strin
     tokio::task::spawn_blocking(iface_stats::get_interface_stats)
         .await
         .map_err(|e| format!("Erro interno: {}", e))?
+}
+
+#[tauri::command]
+pub async fn run_mtr(host: String, cycles: u8) -> Result<Vec<mtr::MtrHop>, String> {
+    tokio::task::spawn_blocking(move || mtr::run_mtr(&host, cycles))
+        .await
+        .map_err(|e| format!("Erro interno: {}", e))?
+}
+
+#[tauri::command]
+pub async fn get_quality_thresholds() -> quality::QualityThresholds {
+    quality::get_thresholds()
 }
 
 #[tauri::command]

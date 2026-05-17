@@ -6,6 +6,7 @@ pub struct DnsServer {
     pub name: String,
     pub latency_ms: u32,
     pub status: String,
+    pub best: bool,
 }
 
 const DNS_TARGETS: &[(&str, &str)] = &[
@@ -29,11 +30,17 @@ pub fn benchmark_dns() -> Vec<DnsServer> {
                 name: name.to_string(),
                 latency_ms: latency,
                 status,
+                best: false,
             }
         })
         .collect();
 
     results.sort_by_key(|r| r.latency_ms);
+    if let Some(first) = results.first_mut() {
+        if first.status == "OK" {
+            first.best = true;
+        }
+    }
     results
 }
 

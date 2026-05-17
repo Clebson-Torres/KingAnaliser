@@ -21,6 +21,8 @@ pub fn run() {
             commands::test_http_timing,
             commands::get_http_targets,
             commands::get_interface_stats,
+            commands::run_mtr,
+            commands::get_quality_thresholds,
             commands::generate_report,
         ])
         .run(tauri::generate_context!())
