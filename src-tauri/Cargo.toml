@@ -1,0 +1,26 @@
+[package]
+name = "analisador-de-rede"
+version = "0.1.0"
+description = "Analisador de Rede completo com Tauri v2"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "analisador_de_rede_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "3"
+local-ip-address = "0.6"
+tokio = { version = "1", features = ["rt"] }
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-fs = "2.5.1"
+chrono = "0.4"
+regex = "1"
+curl = "0.4"

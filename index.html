@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>King Analiser</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <div class="header-row">
+          <div>
+            <h1>King Analiser</h1>
+            <p class="subtitle">Ferramenta completa de diagnóstico de rede</p>
+          </div>
+          <button id="btn-theme" class="btn btn-icon" title="Alternar tema">&#x1F319;</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="controls">
+          <div class="control-group">
+            <h2>Interface de Rede</h2>
+            <select id="iface-select" class="iface-select">
+              <option value="">Carregando interfaces...</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <h2>Testes de IP</h2>
+            <button id="btn-local-ip" class="btn">IP Local</button>
+            <button id="btn-public-ip" class="btn">IP Público</button>
+            <button id="btn-public-ip-info" class="btn">Geo IP</button>
+          </div>
+
+          <div class="control-group">
+            <h2>DNS</h2>
+            <div class="input-row">
+              <input
+                type="text"
+                id="dns-input"
+                placeholder="ex: google.com ou 8.8.8.8"
+                value="google.com"
+              />
+              <button id="btn-dns" class="btn">DNS Lookup</button>
+              <button id="btn-dns-bench" class="btn">DNS Benchmark</button>
+            </div>
+            <div class="input-error" id="dns-error"></div>
+          </div>
+
+          <div class="control-group">
+            <h2>Conectividade</h2>
+            <div class="input-row">
+              <input
+                type="text"
+                id="host-input"
+                placeholder="ex: 8.8.8.8 ou google.com"
+                value="8.8.8.8"
+              />
+              <button id="btn-ping" class="btn">Ping</button>
+              <button id="btn-traceroute" class="btn">Rota</button>
+              <button id="btn-mtr" class="btn">MTR</button>
+            </div>
+            <div class="input-error" id="host-error"></div>
+            <div class="input-row" style="margin-top:8px">
+              <button id="btn-continuous-ping" class="btn">Ping Contínuo</button>
+              <button id="btn-stop-ping" class="btn" disabled>Parar</button>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <h2>Gateway</h2>
+            <button id="btn-gateway" class="btn">Info do Gateway</button>
+          </div>
+
+          <div class="control-group">
+            <h2>HTTP Timing</h2>
+            <button id="btn-http" class="btn">Testar HTTP</button>
+          </div>
+
+          <div class="control-group">
+            <h2>Portas</h2>
+            <div class="input-row">
+              <button id="btn-listening" class="btn">Portas em Escuta</button>
+              <button id="btn-scan" class="btn">Scan de Portas</button>
+              <input
+                type="range"
+                id="scan-timeout"
+                min="300"
+                max="5000"
+                value="1500"
+                step="100"
+                title="Timeout"
+                style="flex:0.6; min-width:60px"
+              />
+              <span id="scan-timeout-label" style="font-size:0.75rem;color:var(--text-dim);min-width:40px">1500ms</span>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <h2>Scan de Rede</h2>
+            <div class="input-row">
+              <input
+                type="text"
+                id="subnet-input"
+                placeholder="Sub-rede (ex: 192.168.1.0/24, vazio = auto)"
+                style="flex:1"
+              />
+              <button id="btn-scan-network" class="btn">Escanear Rede</button>
+            </div>
+            <div id="scan-progress" class="progress-bar hidden">
+              <div id="scan-progress-fill" class="progress-fill"></div>
+              <span id="scan-progress-text" class="progress-text"></span>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <h2>Estatísticas</h2>
+            <button id="btn-iface-stats" class="btn">Stats de Interface</button>
+          </div>
+
+          <div class="control-group full-report">
+            <button id="btn-report" class="btn btn-primary">
+              Relatório Completo
+            </button>
+          </div>
+
+          <div class="control-group">
+            <button id="btn-history" class="btn">Histórico</button>
+          </div>
+
+          <div id="status-bar" class="status-bar hidden">
+            <div class="spinner"></div>
+            <span id="status-text">Executando...</span>
+          </div>
+        </section>
+
+        <div id="gateway-warning" class="warning-banner hidden"></div>
+
+        <section id="graph-section" class="graph-container hidden">
+          <div class="graph-header">
+            <h2>Latência em Tempo Real</h2>
+            <div class="graph-stats">
+              <span id="graph-current">Atual: --</span>
+              <span id="graph-min">Mín: --</span>
+              <span id="graph-max">Máx: --</span>
+              <span id="graph-avg">Média: --</span>
+            </div>
+          </div>
+          <canvas id="latency-canvas" width="700" height="200"></canvas>
+        </section>
+
+        <section id="history-section" class="output hidden">
+          <div class="output-header">
+            <h2>Histórico de Relatórios</h2>
+            <button id="btn-clear-history" class="btn btn-sm" title="Limpar histórico">&#x1F5D1;&#xFE0F; Limpar</button>
+            <button id="btn-close-history" class="btn btn-sm" title="Fechar">&#x2716; Fechar</button>
+          </div>
+          <div id="history-list"></div>
+        </section>
+
+        <section id="output" class="output hidden">
+          <div class="output-header">
+            <h2>Resultados</h2>
+            <button id="btn-export" class="btn btn-sm" title="Exportar relatório">&#x1F4BE; Exportar</button>
+            <button id="btn-export-html" class="btn btn-sm" title="Exportar como HTML">&#x1F310; Exportar HTML</button>
+            <button id="btn-copy" class="btn btn-sm" title="Copiar tudo">&#x1F4CB; Copiar</button>
+            <button id="btn-clear" class="btn btn-sm" title="Limpar">&#x1F5D1;&#xFE0F; Limpar</button>
+          </div>
+          <pre id="output-content"></pre>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
