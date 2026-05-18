@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════
-   King Analiser — Theme Tokyo Night Gold
+   KingNetworkTools — Theme Tokyo Night Gold
    ══════════════════════════════════════════════ */
 
 :root {
@@ -257,25 +257,61 @@ body {
 
 .full-width { grid-column: 1 / -1; }
 
-.connection-bar {
+.dashboard-actions {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 14px;
 }
-.conn-segment {
-  height: 6px;
-  border-radius: 3px;
-  transition: all var(--transition);
+
+.connection-status { margin-top: 16px; }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
 }
-.conn-segment.inactive { background: var(--border) !important; }
-.conn-label {
+
+.status-card {
+  min-height: 68px;
   display: flex;
-  justify-content: space-between;
-  font-size: 0.65rem;
-  color: var(--text-muted);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.status-card-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 10px;
+  background: var(--text-muted);
+}
+
+.status-card-title {
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  color: var(--text-muted);
 }
+
+.status-card-value {
+  margin-top: 2px;
+  font-size: 0.8rem;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.status-card.good { border-color: #4caf8844; }
+.status-card.good .status-card-dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.status-card.warn { border-color: #e0a03055; }
+.status-card.warn .status-card-dot { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+.status-card.bad { border-color: #e5556555; }
+.status-card.bad .status-card-dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.status-card.unknown .status-card-dot { background: var(--text-muted); }
 
 /* ─── Tool Header ─── */
 .tool-header {
@@ -555,6 +591,7 @@ body {
   .nav-item { justify-content: center; padding: 10px; }
   .sidebar-footer .nav-item span:not(.nav-icon) { display: none; }
   .dashboard-grid { grid-template-columns: 1fr 1fr; }
+  .status-grid { grid-template-columns: 1fr 1fr; }
   .input-row { flex-wrap: wrap; }
   .input-row input { min-width: 100%; }
 }

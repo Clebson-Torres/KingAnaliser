@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{TcpStream, ToSocketAddrs};
+use std::thread;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -52,48 +53,46 @@ pub fn scan_network(subnet: Option<String>) -> Result<NetworkScanResult, String>
     let start = Instant::now();
 
     let (base_ip, prefix) = detect_subnet(subnet)?;
-    if prefix > 24 {
-        return Err("Escopo máximo permitido é /24 (254 hosts)".to_string());
+    if prefix != 24 {
+        return Err("No momento o scan de rede aceita apenas sub-redes /24".to_string());
     }
 
     let gateway_ip = get_gateway_ip_quiet();
     let oui_map = build_oui_map();
     let arp_table = get_arp_table();
 
-    let mut hosts = Vec::new();
     let total_hosts = 254u16;
+    let concurrency = thread::available_parallelism()
+        .map(|n| (n.get() * 8).clamp(16, 64))
+        .unwrap_or(32);
 
-    for i in 1..=254 {
-        let ip = format!("{}.{}", base_ip, i);
+    let mut hosts = Vec::new();
+    for chunk_start in (1..=254).step_by(concurrency) {
+        let chunk_end = (chunk_start + concurrency - 1).min(254);
+        let mut chunk_hosts = thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for i in chunk_start..=chunk_end {
+                let ip = format!("{}.{}", base_ip, i);
+                let gateway_ip = gateway_ip.as_deref();
+                let arp_table = &arp_table;
+                let oui_map = &oui_map;
+                handles.push(scope.spawn(move || scan_host(ip, gateway_ip, arp_table, oui_map)));
+            }
 
-        let is_gateway = gateway_ip.as_deref() == Some(&ip);
-        let is_up = check_host_up(&ip);
-
-        if !is_up && !is_gateway {
-            continue;
-        }
-
-        let hostname = if is_up { resolve_hostname(&ip) } else { None };
-        let mac = arp_table.get(&ip).cloned();
-        let vendor = mac.as_ref().and_then(|m| identify_vendor(m, &oui_map));
-        let latency_ms = if is_up { measure_latency(&ip) } else { None };
-
-        let open_ports = if is_up {
-            scan_quick_ports(&ip, SCAN_PORTS)
-        } else {
-            Vec::new()
-        };
-
-        hosts.push(NetworkHost {
-            ip,
-            hostname,
-            mac,
-            vendor,
-            latency_ms,
-            is_gateway,
-            open_ports,
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok().flatten())
+                .collect::<Vec<_>>()
         });
+        hosts.append(&mut chunk_hosts);
     }
+
+    hosts.sort_by_key(|h| {
+        h.ip.rsplit('.')
+            .next()
+            .and_then(|n| n.parse::<u16>().ok())
+            .unwrap_or(0)
+    });
 
     let hosts_up = hosts.len() as u16;
     let scan_duration_secs = start.elapsed().as_secs_f32();
@@ -107,20 +106,60 @@ pub fn scan_network(subnet: Option<String>) -> Result<NetworkScanResult, String>
     })
 }
 
-fn detect_subnet(subnet: Option<String>) -> Result<(String, u8), String> {
+fn scan_host(
+    ip: String,
+    gateway_ip: Option<&str>,
+    arp_table: &HashMap<String, String>,
+    oui_map: &HashMap<&str, &str>,
+) -> Option<NetworkHost> {
+    let is_gateway = gateway_ip == Some(ip.as_str());
+    let is_up = check_host_up(&ip);
+
+    if !is_up && !is_gateway {
+        return None;
+    }
+
+    let hostname = if is_up { resolve_hostname(&ip) } else { None };
+    let mac = arp_table.get(&ip).cloned();
+    let vendor = mac.as_ref().and_then(|m| identify_vendor(m, oui_map));
+    let latency_ms = if is_up { measure_latency(&ip) } else { None };
+
+    let open_ports = if is_up {
+        scan_quick_ports(&ip, SCAN_PORTS)
+    } else {
+        Vec::new()
+    };
+
+    Some(NetworkHost {
+        ip,
+        hostname,
+        mac,
+        vendor,
+        latency_ms,
+        is_gateway,
+        open_ports,
+    })
+}
+
+pub(crate) fn detect_subnet(subnet: Option<String>) -> Result<(String, u8), String> {
     if let Some(s) = subnet {
+        let s = s.trim();
         if let Some(pos) = s.find('/') {
             let base = s[..pos].trim_end_matches('.').to_string();
-            let prefix: u8 = s[pos+1..].parse().unwrap_or(24);
+            let prefix: u8 = s[pos + 1..]
+                .parse()
+                .map_err(|_| "Prefixo CIDR inválido".to_string())?;
             let parts: Vec<&str> = base.split('.').collect();
-            if parts.len() >= 3 {
-                return Ok((format!("{}.{}", parts[0], parts[1]), prefix));
+            if parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok()) {
+                return Ok((format!("{}.{}.{}", parts[0], parts[1], parts[2]), prefix));
             }
+            return Err("Sub-rede inválida. Use o formato 192.168.1.0/24".to_string());
         }
         let parts: Vec<&str> = s.split('.').collect();
-        if parts.len() >= 3 {
-            return Ok((format!("{}.{}", parts[0], parts[1]), 24));
+        if parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok()) {
+            return Ok((format!("{}.{}.{}", parts[0], parts[1], parts[2]), 24));
         }
+        return Err("Sub-rede inválida. Use o formato 192.168.1.0/24".to_string());
     }
 
     let output = std::process::Command::new("ip")
@@ -134,8 +173,8 @@ fn detect_subnet(subnet: Option<String>) -> Result<(String, u8), String> {
         if let Some(pos) = line.find('/') {
             let ip_part = line[..pos].trim();
             let parts: Vec<&str> = ip_part.split('.').collect();
-            if parts.len() >= 3 {
-                return Ok((format!("{}.{}", parts[0], parts[1]), 24));
+            if parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok()) {
+                return Ok((format!("{}.{}.{}", parts[0], parts[1], parts[2]), 24));
             }
         }
     }
@@ -195,26 +234,32 @@ fn resolve_hostname(ip: &str) -> Option<String> {
     if cfg!(target_os = "windows") {
         let output = std::process::Command::new("nslookup")
             .args([ip])
-            .output().ok()?;
+            .output()
+            .ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if line.contains("Name:") {
                 if let Some(name) = line.split(':').nth(1) {
                     let name = name.trim().trim_end_matches('.').to_string();
-                    if !name.is_empty() { return Some(name); }
+                    if !name.is_empty() {
+                        return Some(name);
+                    }
                 }
             }
         }
     } else {
         let output = std::process::Command::new("host")
             .args([ip])
-            .output().ok()?;
+            .output()
+            .ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if let Some(pos) = line.find("domain name pointer") {
                 let rest = &line[pos + "domain name pointer".len()..];
                 let name = rest.trim().trim_end_matches('.').to_string();
-                if !name.is_empty() { return Some(name); }
+                if !name.is_empty() {
+                    return Some(name);
+                }
             }
         }
     }
@@ -229,7 +274,12 @@ fn get_arp_table() -> HashMap<String, String> {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 && parts[0].chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if parts.len() >= 3
+                    && parts[0]
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c.is_ascii_digit())
+                {
                     let ip = parts[0].trim().to_string();
                     let mac = parts[1].trim().to_string();
                     if mac != "ff-ff-ff-ff-ff-ff" && mac != "00-00-00-00-00-00" {
@@ -242,7 +292,9 @@ fn get_arp_table() -> HashMap<String, String> {
         let content = std::fs::read_to_string("/proc/net/arp").ok();
         if let Some(data) = content {
             for (i, line) in data.lines().enumerate() {
-                if i == 0 { continue; }
+                if i == 0 {
+                    continue;
+                }
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 4 {
                     let ip = parts[0].to_string();
@@ -286,20 +338,20 @@ fn measure_latency(ip: &str) -> Option<f32> {
             for line in stdout.lines() {
                 if cfg!(target_os = "windows") {
                     if let Some(pos) = line.find("tempo=") {
-                        let rest = &line[pos+6..];
+                        let rest = &line[pos + 6..];
                         if let Some(end) = rest.find('m') {
                             return rest[..end].trim().parse::<f32>().ok();
                         }
                     }
                     if let Some(pos) = line.find("time=") {
-                        let rest = &line[pos+5..];
+                        let rest = &line[pos + 5..];
                         if let Some(end) = rest.find('m') {
                             return rest[..end].trim().parse::<f32>().ok();
                         }
                     }
                 } else {
                     if let Some(pos) = line.find("time=") {
-                        let rest = &line[pos+5..];
+                        let rest = &line[pos + 5..];
                         if let Some(end) = rest.find("ms") {
                             return rest[..end].trim().parse::<f32>().ok();
                         }

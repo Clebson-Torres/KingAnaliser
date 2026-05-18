@@ -11,26 +11,30 @@ pub struct QualityThresholds {
 
 pub fn classify_latency(avg_ms: f32) -> &'static str {
     match avg_ms as u32 {
-        0..=4   => "Excelente",
-        5..=29  => "Bom",
+        0..=4 => "Excelente",
+        5..=29 => "Bom",
         30..=79 => "Aceitável",
-        _       => "Ruim",
+        _ => "Ruim",
     }
 }
 
 #[allow(dead_code)]
 pub fn classify_loss(pct: f32) -> &'static str {
-    if pct == 0.0        { "Sem perda" }
-    else if pct <= 2.0   { "Perda baixa" }
-    else                 { "Perda alta" }
+    if pct == 0.0 {
+        "Sem perda"
+    } else if pct <= 2.0 {
+        "Perda baixa"
+    } else {
+        "Perda alta"
+    }
 }
 
 #[allow(dead_code)]
 pub fn quality_color(quality: &str) -> &'static str {
     match quality {
         "Excelente" | "Bom" | "ok" => "green",
-        "Aceitável" | "warning"    => "yellow",
-        _                          => "red",
+        "Aceitável" | "warning" => "yellow",
+        _ => "red",
     }
 }
 

@@ -33,24 +33,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "analisador-de-rede"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "curl",
- "local-ip-address",
- "regex",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tokio",
- "ureq",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1746,6 +1728,24 @@ dependencies = [
  "bitflags 2.11.1",
  "serde",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "kingnetworktools"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "curl",
+ "local-ip-address",
+ "regex",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tokio",
+ "ureq",
 ]
 
 [[package]]

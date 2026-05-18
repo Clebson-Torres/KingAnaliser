@@ -1,5 +1,5 @@
-use serde::Serialize;
 use super::route;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct MtrHop {
@@ -39,19 +39,26 @@ pub fn run_mtr(host: &str, cycles: u8) -> Result<Vec<MtrHop>, String> {
 
     // Fallback: use traceroute data as MTR-like results
     let hops = route::trace_route(host)?;
-    Ok(hops.into_iter().map(|h| MtrHop {
-        hop: h.hop_number as u8,
-        host: h.address,
-        loss_pct: h.loss_pct,
-        avg_ms: h.avg_ms,
-        best_ms: h.min_ms,
-        worst_ms: h.max_ms,
-        jitter_ms: if h.max_ms > h.min_ms { h.max_ms - h.min_ms } else { 0.0 },
-        quality: h.status,
-    }).collect())
+    Ok(hops
+        .into_iter()
+        .map(|h| MtrHop {
+            hop: h.hop_number as u8,
+            host: h.address,
+            loss_pct: h.loss_pct,
+            avg_ms: h.avg_ms,
+            best_ms: h.min_ms,
+            worst_ms: h.max_ms,
+            jitter_ms: if h.max_ms > h.min_ms {
+                h.max_ms - h.min_ms
+            } else {
+                0.0
+            },
+            quality: h.status,
+        })
+        .collect())
 }
 
-fn parse_mtr_output(output: &str) -> Result<Vec<MtrHop>, String> {
+pub(crate) fn parse_mtr_output(output: &str) -> Result<Vec<MtrHop>, String> {
     let mut hops = Vec::new();
 
     for line in output.lines() {
@@ -65,17 +72,28 @@ fn parse_mtr_output(output: &str) -> Result<Vec<MtrHop>, String> {
             continue;
         }
 
-        let hop: u8 = parts[0].parse().unwrap_or(0);
+        let hop_token: String = parts[0]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        let hop: u8 = hop_token.parse().unwrap_or(0);
         if hop == 0 {
             continue;
         }
 
-        let host = parts[1].to_string();
-        let loss_pct: f32 = parts[2].trim_end_matches('%').parse().unwrap_or(0.0);
-        let best_ms: f32 = parts[4].parse().unwrap_or(0.0);
-        let avg_ms: f32 = parts[5].parse().unwrap_or(0.0);
-        let worst_ms: f32 = parts[6].parse().unwrap_or(0.0);
-        let jitter_ms: f32 = parts[7].parse().unwrap_or(0.0);
+        let Some(loss_idx) = parts.iter().position(|p| p.ends_with('%')) else {
+            continue;
+        };
+        if loss_idx < 2 || parts.len() <= loss_idx + 6 {
+            continue;
+        }
+
+        let host = parts[1..loss_idx].join(" ");
+        let loss_pct: f32 = parts[loss_idx].trim_end_matches('%').parse().unwrap_or(0.0);
+        let avg_ms: f32 = parts[loss_idx + 3].parse().unwrap_or(0.0);
+        let best_ms: f32 = parts[loss_idx + 4].parse().unwrap_or(0.0);
+        let worst_ms: f32 = parts[loss_idx + 5].parse().unwrap_or(0.0);
+        let jitter_ms: f32 = parts[loss_idx + 6].parse().unwrap_or(0.0);
 
         let quality = if avg_ms < 30.0 && loss_pct == 0.0 {
             "ok"
@@ -124,8 +142,12 @@ fn run_mtr_windows(host: &str, cycles: u8) -> Result<Vec<MtrHop>, String> {
             continue;
         }
 
-        let Ok(hop_num) = parts[0].parse::<u8>() else { continue };
-        if hop_num > 30 { break; }
+        let Ok(hop_num) = parts[0].parse::<u8>() else {
+            continue;
+        };
+        if hop_num > 30 {
+            break;
+        }
 
         let addr = if parts[1] == "*" || parts.contains(&"Request") {
             String::new()
@@ -170,18 +192,32 @@ fn run_mtr_windows(host: &str, cycles: u8) -> Result<Vec<MtrHop>, String> {
                         if ms_str > 0.0 {
                             total_ms += ms_str;
                             count += 1;
-                            if ms_str < best_ms { best_ms = ms_str; }
-                            if ms_str > worst_ms { worst_ms = ms_str; }
+                            if ms_str < best_ms {
+                                best_ms = ms_str;
+                            }
+                            if ms_str > worst_ms {
+                                worst_ms = ms_str;
+                            }
                         }
                     }
                 }
             }
         }
 
-        let avg_ms = if count > 0 { total_ms / count as f32 } else { 0.0 };
-        if best_ms == f32::MAX { best_ms = 0.0; }
+        let avg_ms = if count > 0 {
+            total_ms / count as f32
+        } else {
+            0.0
+        };
+        if best_ms == f32::MAX {
+            best_ms = 0.0;
+        }
         let jitter_ms = worst_ms - best_ms;
-        let loss_pct = if cycles > 0 { ((cycles - count) as f32 / cycles as f32) * 100.0 } else { 0.0 };
+        let loss_pct = if cycles > 0 {
+            ((cycles - count) as f32 / cycles as f32) * 100.0
+        } else {
+            0.0
+        };
 
         let quality = if avg_ms < 30.0 && loss_pct == 0.0 {
             "ok"

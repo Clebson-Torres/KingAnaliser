@@ -1,12 +1,12 @@
 [package]
-name = "analisador-de-rede"
+name = "kingnetworktools"
 version = "0.1.0"
-description = "Analisador de Rede completo com Tauri v2"
+description = "KingNetworkTools - analisador de rede completo com Tauri v2"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "analisador_de_rede_lib"
+name = "kingnetworktools_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

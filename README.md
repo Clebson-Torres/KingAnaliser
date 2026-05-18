@@ -1,161 +1,174 @@
 # 🌐 KingNetworkTools — Analisador de Rede
 
-App desktop para diagnóstico completo de rede, construído com **Tauri v2 + Rust + Vite**.
-Executa análises diretamente no sistema operacional via backend Rust, sem dependência de serviços externos além do IP público.
+KingNetworkTools é um aplicativo desktop para diagnóstico de rede feito com **Tauri v2**, **Rust** e **Vite**. Ele reúne ferramentas de conectividade em uma interface única: status da conexão, ping, traceroute, MTR, DNS, portas, scan de rede, timing HTTP e relatórios exportáveis.
 
-![Build](https://github.com/Clebson-Torres/KingAnaliser/actions/workflows/build.yml/badge.svg)
-![Rust](https://img.shields.io/badge/Rust-64.9%25-orange?logo=rust)
-![Tauri](https://img.shields.io/badge/Tauri-v2-blue?logo=tauri)
-![Plataformas](https://img.shields.io/badge/Linux%20%7C%20Windows-suportados-brightgreen)
+O backend roda em Rust e executa as coletas diretamente no sistema operacional. O frontend é HTML, CSS e JavaScript vanilla.
 
----
+## Destaques
 
-## ✨ Funcionalidades
+- Dashboard com cartões de status para Gateway, DNS, Internet e Estabilidade.
+- Relatório completo acessível pelo Dashboard e pela aba Relatórios.
+- Relatórios TXT/HTML com tabelas ASCII, resumo executivo e detalhes úteis de cada diagnóstico.
+- Ping contínuo com gráfico temporário de latência em tempo real.
+- Traceroute com múltiplas tentativas no Linux: padrão, TCP/443, ICMP e `tracepath`.
+- MTR integrado na aba Traceroute, para evitar duplicidade de navegação.
+- Scan de rede `/24` com concorrência controlada para reduzir o tempo de varredura.
+- Ícone customizado gerado com `tauri icon`.
 
-| Comando | Descrição |
+## Funcionalidades
+
+| Área | O que faz |
 |---|---|
-| **IP Local** | Detecta IP da interface ativa e gateway padrão |
-| **IP Público** | Consulta IP externo via `api.ipify.org` |
-| **Ping** | Envia 4 pacotes ICMP e exibe latência + perda |
-| **Traceroute** | Mapeia todos os saltos até o destino (até 30 hops) |
-| **Portas em Escuta** | Lista portas TCP abertas localmente via `ss`/`netstat` |
-| **Scan TCP** | Varre 29 portas comuns via `TcpStream::connect_timeout` |
-| **Relatório** | Consolida todos os resultados em texto exportável |
+| Dashboard | Mostra IP local, IP público, gateway, DNS, latência e status atual da conexão |
+| Ping | Mede pacotes enviados/recebidos, perda, mínimo, média, máximo e jitter |
+| Ping contínuo | Emite amostras em tempo real e exibe gráfico de latência |
+| Traceroute | Mapeia saltos até o destino e classifica hops por latência/perda |
+| MTR | Mede perda, média, melhor/pior latência e jitter por hop, dentro da aba Traceroute |
+| IP / Gateway | Lista interfaces, IP público, geolocalização e gateways padrão |
+| DNS | Faz lookup do alvo e benchmark de resolvedores conhecidos |
+| Portas | Lista portas locais em escuta e faz scan TCP em portas comuns |
+| Scan de Rede | Varre uma sub-rede `/24` com concorrência limitada |
+| HTTP Timing | Mede tempo total de acesso a alvos HTTP predefinidos |
+| Relatórios | Consolida os resultados em relatório detalhado, com histórico local e exportação |
 
-### Extras
-- **Exportar** — diálogo nativo "Salvar como" para `.txt`
-- **Copiar** — resultado direto para a área de transferência
-- **Interface assíncrona** — todos os comandos rodam em thread pool, sem travar a UI
-- **Tema Tokyo Night** — interface escura de alto contraste
+## Traceroute vs MTR
 
----
+**Traceroute** executa uma rota pontual até o destino e mostra os saltos encontrados. É bom para entender o caminho.
 
-## 📦 Download
+**MTR** combina traceroute com medições repetidas por hop. É melhor para observar perda, jitter e instabilidade ao longo do caminho.
 
-Acesse a página de [Releases](https://github.com/Clebson-Torres/KingAnaliser/releases) e baixe o instalador:
+No app, os dois ficam na mesma aba porque investigam o mesmo problema por perspectivas complementares.
 
-| Plataforma | Arquivo |
-|---|---|
-| Windows | `King-Analiser_x.x.x_x64-setup.exe` |
-| Windows (MSI) | `King-Analiser_x.x.x_x64_en-US.msi` |
-| Linux (AppImage) | `king-analiser_x.x.x_amd64.AppImage` |
-| Linux (Debian/Ubuntu) | `king-analiser_x.x.x_amd64.deb` |
+## Stack
 
----
+- Frontend: HTML, CSS e JavaScript vanilla
+- Bundler: Vite 6
+- Desktop: Tauri v2
+- Backend: Rust
+- IPC: `@tauri-apps/api/core`
+- Plugins: `@tauri-apps/plugin-dialog` e `@tauri-apps/plugin-fs`
+- HTTP: `ureq 3.x`
+- Sistema: `ping`, `traceroute`, `tracepath`, `mtr`, `ss`, `netstat`, `ip`, `arp`, PowerShell no Windows
 
-## 🛠️ Stack
+## Requisitos
 
-- **Frontend:** HTML + CSS + JavaScript vanilla — [Vite 6](https://vitejs.dev/)
-- **Backend:** [Rust](https://www.rust-lang.org/) + [Tauri v2](https://v2.tauri.app/)
-- **IPC:** `@tauri-apps/api/core` → `invoke()`
-- **HTTP:** `ureq 3.x` (IP público)
-- **Rede local:** `local-ip-address` crate
+- Node.js 18+
+- Rust stable
+- Tauri CLI v2
 
----
-
-## 🚀 Desenvolvimento local
-
-### Pré-requisitos
-
-- [Node.js 18+](https://nodejs.org/)
-- [Rust stable](https://rustup.rs/)
-- Tauri CLI v2:
 ```bash
 cargo install tauri-cli --version "^2"
 ```
 
-**Dependências Linux (Debian/Ubuntu):**
+Dependências Linux comuns:
+
 ```bash
 sudo apt-get install -y \
   libwebkit2gtk-4.1-dev libgtk-3-dev \
   libappindicator3-dev librsvg2-dev patchelf
 ```
 
-**Dependências Linux (Fedora):**
+Ferramentas recomendadas no Linux:
+
 ```bash
-sudo dnf install webkit2gtk4.1-devel gtk3-devel \
-  libappindicator-gtk3-devel librsvg2-devel
+sudo apt-get install -y iproute2 iputils-ping traceroute iputils-tracepath mtr-tiny dnsutils
 ```
 
-### Rodando em modo dev
+## Desenvolvimento
 
 ```bash
 npm install
 npm run tauri dev
 ```
 
-> Para testar só o frontend (sem Tauri): `npm run dev` — os comandos IPC não funcionam sem o backend.
+Para testar apenas o frontend:
 
-### Build local
+```bash
+npm run dev
+```
+
+Os comandos IPC de rede dependem do backend Tauri, então não funcionam no navegador puro.
+
+## Build
 
 ```bash
 npm run tauri build
 ```
 
-Artefatos gerados em `src-tauri/target/release/bundle/`.
+Os artefatos ficam em:
 
----
-
-## 🗂️ Estrutura do projeto
-
+```text
+src-tauri/target/release/bundle/
 ```
-KingAnaliser/
-├── index.html                      # UI principal
-├── style.css                       # Tema Tokyo Night
-├── vite.config.js                  # Porta 1420, HMR
+
+## Testes
+
+```bash
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+## Ícones
+
+Os ícones ficam em `src-tauri/icons/`. Para regerar:
+
+```bash
+tauri icon /caminho/para/icon.png
+```
+
+## Estrutura
+
+```text
+.
+├── index.html
+├── style.css
+├── vite.config.js
 ├── src/
-│   └── main.js                     # Lógica frontend + invoke()
+│   └── main.js
 └── src-tauri/
-    ├── Cargo.toml                   # Rust: tauri 2, serde, ureq, local-ip-address
-    ├── tauri.conf.json              # Janela, build, bundle
-    ├── capabilities/
-    │   └── default.json             # Permissões Tauri (core:default)
+    ├── Cargo.toml
+    ├── tauri.conf.json
+    ├── capabilities/default.json
     └── src/
-        ├── lib.rs                   # Registra comandos
-        ├── commands.rs              # Handlers IPC
+        ├── main.rs
+        ├── lib.rs
+        ├── commands.rs
         └── analyzer/
-            ├── ip.rs                # IP local + público
-            ├── route.rs             # Ping + traceroute
-            ├── ports.rs             # Portas em escuta + scan TCP
-            └── report.rs            # Geração de relatório
+            ├── dns.rs
+            ├── dns_bench.rs
+            ├── gateway.rs
+            ├── http_timing.rs
+            ├── iface_stats.rs
+            ├── ip.rs
+            ├── mtr.rs
+            ├── network_scan.rs
+            ├── ports.rs
+            ├── quality.rs
+            ├── report.rs
+            ├── route.rs
+            └── tests.rs
 ```
 
----
-
-## ⚙️ Comportamento cross-platform
-
-O backend adapta os comandos automaticamente ao sistema operacional:
+## Comportamento por plataforma
 
 | Função | Linux | Windows |
 |---|---|---|
-| Ping | `ping -c 4` | `ping -n 4` |
-| Traceroute | `traceroute -n -m 30` | `tracert -h 30 -d` |
-| Portas | `ss -tlnp4` | `netstat -ano` |
-| Gateway | `ip route show default` | `netstat -rn` |
+| Ping | `ping -c` | `ping -n` |
+| Traceroute | `traceroute`, `traceroute -T`, `traceroute -I`, fallback `tracepath` | `tracert` |
+| MTR | `mtr --report` com fallback para traceroute | fallback baseado em `tracert` + `ping` |
+| Portas locais | `ss -tln4` | `netstat -ano` |
+| Gateway | `ip route show` | `netstat -rn` |
+| Interfaces | `ip -j addr show` | PowerShell `Get-NetAdapter` |
 
----
+## Limitações conhecidas
 
-## 🔄 CI/CD — Build automático
+- Scan de rede atualmente aceita apenas sub-redes `/24`.
+- Alguns ambientes bloqueiam ICMP/UDP/TCP usado por traceroute/MTR; nesses casos o app mostra aviso de rota parcialmente filtrada.
+- `mtr`, `traceroute`, `tracepath`, `dig` e `nslookup` podem não estar instalados por padrão.
+- IP público e geolocalização dependem de conectividade com serviços externos.
+- Hosts que bloqueiam ICMP podem aparecer com perda alta mesmo quando serviços TCP funcionam.
 
-O projeto usa GitHub Actions para gerar os instaladores automaticamente ao criar uma tag:
+## Licença
 
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-Os builds de Linux e Windows rodam em paralelo e são publicados automaticamente como Release.
-
----
-
-## ⚠️ Limitações conhecidas
-
-- `traceroute` pode exigir `sudo` em alguns sistemas Linux — o app tenta sem privilégios
-- IP público depende de conectividade com `api.ipify.org` (porta 443)
-- Ping reporta 100% de perda em hosts que bloqueiam ICMP (comportamento esperado)
-
----
-
-## 📄 Licença
-
-MIT — veja [LICENSE](LICENSE) para detalhes.
+MIT

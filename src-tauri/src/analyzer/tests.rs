@@ -1,7 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::analyzer::route::{classify_latency, parse_ping_output, parse_tracepath_output};
     use crate::analyzer::iface_stats::parse_proc_net_dev;
+    use crate::analyzer::mtr::parse_mtr_output;
+    use crate::analyzer::network_scan::detect_subnet;
+    use crate::analyzer::route::{
+        classify_latency, parse_ping_output, parse_tracepath_output, ping_continuous_parse_line,
+    };
 
     #[test]
     fn test_parse_tracepath_normal() {
@@ -14,10 +18,12 @@ mod tests {
         assert_eq!(hops.len(), 4);
         assert_eq!(hops[0].hop_number, 1);
         assert_eq!(hops[0].address, "192.168.1.1");
-        assert_eq!(hops[0].latency_ms, "1.234ms");
+        assert!((hops[0].avg_ms - 1.234).abs() < 0.01);
+        assert_eq!(hops[0].status, "ok");
         assert_eq!(hops[1].address, "10.198.0.79");
         assert_eq!(hops[2].address, "*");
-        assert_eq!(hops[2].latency_ms, "?");
+        assert_eq!(hops[2].loss_pct, 100.0);
+        assert_eq!(hops[2].status, "no_reply");
         assert_eq!(hops[3].hop_number, 4);
     }
 
@@ -37,11 +43,11 @@ mod tests {
 
 --- 8.8.8.8 ping statistics ---
 4 packets transmitted, 4 received, 0% packet loss, time 3004ms
-rtt min/avg/max/mdev = 11.800/12.025/12.300/0.183 ms";
+        rtt min/avg/max/mdev = 11.800/12.025/12.300/0.183 ms";
         let result = parse_ping_output(output, 4).unwrap();
-        assert_eq!(result.transmitted, 4);
-        assert_eq!(result.received, 4);
-        assert_eq!(result.loss_pct, 0);
+        assert_eq!(result.packets_sent, 4);
+        assert_eq!(result.packets_received, 4);
+        assert_eq!(result.loss_pct, 0.0);
         assert!((result.avg_ms - 12.025).abs() < 0.01);
         assert!((result.min_ms - 11.800).abs() < 0.01);
         assert!((result.max_ms - 12.300).abs() < 0.01);
@@ -57,10 +63,10 @@ rtt min/avg/max/mdev = 11.800/12.025/12.300/0.183 ms";
 
 --- 8.8.8.8 ping statistics ---
 4 pacotes transmitidos, 4 recebidos, 0% perda de pacotes, tempo 3004ms
-rtt min/avg/max/mdev = 14.800/15.100/15.500/0.260 ms";
+        rtt min/avg/max/mdev = 14.800/15.100/15.500/0.260 ms";
         let result = parse_ping_output(output, 4).unwrap();
-        assert_eq!(result.transmitted, 4);
-        assert_eq!(result.loss_pct, 0);
+        assert_eq!(result.packets_sent, 4);
+        assert_eq!(result.loss_pct, 0.0);
         assert!((result.avg_ms - 15.100).abs() < 0.01);
     }
 
@@ -68,11 +74,65 @@ rtt min/avg/max/mdev = 14.800/15.100/15.500/0.260 ms";
     fn test_parse_ping_loss() {
         let output = "PING 10.0.0.1 (10.0.0.1) 56(84) bytes of data.
 
---- 10.0.0.1 ping statistics ---
+        --- 10.0.0.1 ping statistics ---
 4 packets transmitted, 0 received, 100% packet loss, time 3004ms";
         let result = parse_ping_output(output, 4).unwrap();
-        assert_eq!(result.received, 0);
-        assert_eq!(result.loss_pct, 100);
+        assert_eq!(result.packets_received, 0);
+        assert_eq!(result.loss_pct, 100.0);
+    }
+
+    #[test]
+    fn test_ping_continuous_parse_variants() {
+        assert_eq!(
+            ping_continuous_parse_line("64 bytes from 8.8.8.8: icmp_seq=1 ttl=118 time=12.3 ms"),
+            Some(12.3)
+        );
+        assert_eq!(
+            ping_continuous_parse_line("Resposta de 8.8.8.8: bytes=32 tempo=7ms TTL=118"),
+            Some(7.0)
+        );
+        assert_eq!(
+            ping_continuous_parse_line("Resposta de 127.0.0.1: bytes=32 tempo<1ms TTL=128"),
+            Some(0.5)
+        );
+        assert_eq!(
+            ping_continuous_parse_line("64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time<1 ms"),
+            Some(0.5)
+        );
+    }
+
+    #[test]
+    fn test_detect_subnet_keeps_three_octets() {
+        let (base, prefix) = detect_subnet(Some("192.168.1.0/24".to_string())).unwrap();
+        assert_eq!(base, "192.168.1");
+        assert_eq!(prefix, 24);
+
+        let (base, prefix) = detect_subnet(Some("10.0.42.99".to_string())).unwrap();
+        assert_eq!(base, "10.0.42");
+        assert_eq!(prefix, 24);
+    }
+
+    #[test]
+    fn test_detect_subnet_rejects_invalid_input() {
+        assert!(detect_subnet(Some("192.168.x.0/24".to_string())).is_err());
+        assert!(detect_subnet(Some("192.168.1.0/not-a-prefix".to_string())).is_err());
+    }
+
+    #[test]
+    fn test_parse_mtr_report_output() {
+        let output =
+            "HOST: local                         Loss%   Snt   Last   Avg  Best  Wrst StDev
+  1.|-- 172.18.1.10                  0.0%     5    0.8   0.9   0.6   1.4   0.3
+  2.|-- 8.8.8.8                      0.0%     5   12.0  12.4  11.8  13.1   0.5";
+
+        let hops = parse_mtr_output(output).unwrap();
+        assert_eq!(hops.len(), 2);
+        assert_eq!(hops[0].hop, 1);
+        assert_eq!(hops[0].host, "172.18.1.10");
+        assert!((hops[0].avg_ms - 0.9).abs() < 0.01);
+        assert!((hops[0].best_ms - 0.6).abs() < 0.01);
+        assert!((hops[0].worst_ms - 1.4).abs() < 0.01);
+        assert!((hops[0].jitter_ms - 0.3).abs() < 0.01);
     }
 
     #[test]

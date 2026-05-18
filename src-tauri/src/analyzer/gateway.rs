@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::route;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GatewayInfo {
@@ -50,7 +50,10 @@ pub fn get_gateway_info() -> Result<GatewayInfo, String> {
     }
 
     let warning = if has_multiple {
-        let primary = gateways.first().map(|g| format!("{} ({})", g.interface, g.ip)).unwrap_or_default();
+        let primary = gateways
+            .first()
+            .map(|g| format!("{} ({})", g.interface, g.ip))
+            .unwrap_or_default();
         Some(format!(
             "Gateway duplo detectado. Verifique se o roteamento assimétrico \
              está causando instabilidade. Interface primária: {}",
@@ -87,7 +90,8 @@ fn get_all_gateways() -> Result<Vec<(String, String, u32)>, String> {
             if parts.len() >= 5 {
                 let gw = parts[2].to_string();
                 let iface = parts[4].to_string();
-                let metric = parts.iter()
+                let metric = parts
+                    .iter()
                     .position(|p| p == &"metric")
                     .and_then(|idx| parts.get(idx + 1))
                     .and_then(|m| m.parse::<u32>().ok())

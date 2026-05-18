@@ -4,16 +4,9 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 pub const COMMON_PORTS: &[u16] = &[
-    21, 22, 23, 25, 53,
-    80, 110, 111, 135, 139,
-    143, 443, 445, 465, 587,
-    993, 995, 1080, 1194, 1433,
-    1521, 2049, 2375, 3000, 3306,
-    3389, 4444, 5432, 5900, 6379,
-    6881, 7070, 8080, 8443, 8888,
-    9000, 9090, 9200, 10000, 11211,
-    27017, 27018, 50000, 51413, 52869,
-    55443, 60000,
+    21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 465, 587, 993, 995, 1080, 1194,
+    1433, 1521, 2049, 2375, 3000, 3306, 3389, 4444, 5432, 5900, 6379, 6881, 7070, 8080, 8443, 8888,
+    9000, 9090, 9200, 10000, 11211, 27017, 27018, 50000, 51413, 52869, 55443, 60000,
 ];
 
 fn build_service_map() -> HashMap<u16, &'static str> {
@@ -132,7 +125,11 @@ fn parse_listening_ports(output: &str) -> Result<Vec<ListeningPort>, String> {
     } else {
         for line in output.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with("Netid") || line.starts_with("ss:") || line.starts_with("State") {
+            if line.is_empty()
+                || line.starts_with("Netid")
+                || line.starts_with("ss:")
+                || line.starts_with("State")
+            {
                 continue;
             }
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -220,5 +217,7 @@ pub fn scan_ports(host: &str, ports: &[u16], timeout_ms: u64) -> Vec<ScanResult>
 }
 
 fn service_name(port: u16, map: &HashMap<u16, &'static str>) -> String {
-    map.get(&port).map(|s| s.to_string()).unwrap_or_else(|| format!("TCP/{}", port))
+    map.get(&port)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("TCP/{}", port))
 }

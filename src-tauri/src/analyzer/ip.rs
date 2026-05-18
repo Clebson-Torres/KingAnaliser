@@ -52,8 +52,8 @@ pub fn get_network_interfaces() -> Result<Vec<InterfaceInfo>, String> {
 }
 
 fn parse_ip_json(output: &str) -> Result<Vec<InterfaceInfo>, String> {
-    let parsed: Vec<serde_json::Value> = serde_json::from_str(output)
-        .map_err(|e| format!("Erro ao parsear JSON do ip: {}", e))?;
+    let parsed: Vec<serde_json::Value> =
+        serde_json::from_str(output).map_err(|e| format!("Erro ao parsear JSON do ip: {}", e))?;
 
     let mut interfaces = Vec::new();
 
@@ -77,7 +77,12 @@ fn parse_ip_json(output: &str) -> Result<Vec<InterfaceInfo>, String> {
         };
 
         if !name.starts_with("lo") {
-            interfaces.push(InterfaceInfo { name, ip, mac, is_up });
+            interfaces.push(InterfaceInfo {
+                name,
+                ip,
+                mac,
+                is_up,
+            });
         }
     }
 
@@ -165,7 +170,12 @@ fn get_interfaces_windows() -> Result<Vec<InterfaceInfo>, String> {
 
             let ip = get_windows_ip(&name).unwrap_or_default();
 
-            interfaces.push(InterfaceInfo { name, ip, mac, is_up });
+            interfaces.push(InterfaceInfo {
+                name,
+                ip,
+                mac,
+                is_up,
+            });
         }
         Ok(interfaces)
     } else {
@@ -213,69 +223,219 @@ pub fn get_public_ip_address() -> Result<String, String> {
     Ok(ip.trim().to_string())
 }
 
-pub fn get_public_ip_info() -> Result<IpInfo, String> {
+fn fetch_json(url: &str) -> Result<String, String> {
     let config = ureq::config::Config::builder()
-        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .timeout_global(Some(std::time::Duration::from_secs(8)))
         .build();
     let agent = ureq::Agent::new_with_config(config);
 
     let resp = agent
-        .get("https://ip-api.com/json/?fields=status,country,countryCode,region,regionName,city,isp,org,as,asname,proxy,hosting,query,reverse")
-        .header("User-Agent", "KingAnaliser/1.0")
+        .get(url)
+        .header(
+            "User-Agent",
+            "KingNetworkTools/1.0 (Network Diagnostic Tool)",
+        )
         .header("Accept", "application/json")
         .call()
-        .map_err(|e| format!("Falha ao consultar ip-api: {}", e))?;
+        .map_err(|e| format!("{}", e))?;
 
     let mut body = resp.into_body();
-    let text = body
-        .read_to_string()
-        .map_err(|e| format!("Erro ao ler resposta: {}", e))?;
+    body.read_to_string()
+        .map_err(|e| format!("Erro ao ler resposta: {}", e))
+}
 
-    let json: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("Erro ao parsear JSON: {}", e))?;
+fn parse_ip_api_json(text: &str) -> Result<IpInfo, String> {
+    let json: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("Erro JSON: {}", e))?;
 
     if json.get("status").and_then(|v| v.as_str()) != Some("success") {
-        return Err(format!("API retornou erro: {}", json));
+        return Err("API retornou erro".to_string());
     }
 
-    let ipv4 = json["query"].as_str().unwrap_or("").to_string();
-    let hostname = json["reverse"].as_str().map(|s| s.to_string());
-    let country = json["country"].as_str().unwrap_or("").to_string();
-    let country_code = json["countryCode"].as_str().unwrap_or("").to_string();
-    let region = json["regionName"].as_str().unwrap_or("").to_string();
-    let city = json["city"].as_str().unwrap_or("").to_string();
-    let isp = json["isp"].as_str().unwrap_or("").to_string();
-    let org = json["org"].as_str().unwrap_or("").to_string();
-    let is_proxy = json["proxy"].as_bool().unwrap_or(false);
-    let is_hosting = json["hosting"].as_bool().unwrap_or(false);
-
     let as_raw = json["as"].as_str().unwrap_or("");
-    let as_name = json["asname"].as_str().unwrap_or("").to_string();
     let asn = if as_raw.starts_with("AS") {
-        let parts: Vec<&str> = as_raw.splitn(2, ' ').collect();
-        parts[0].to_string()
+        as_raw.splitn(2, ' ').next().unwrap_or("").to_string()
     } else {
         as_raw.to_string()
     };
 
-    let ipv6 = get_ipv6_quiet();
+    Ok(IpInfo {
+        ipv4: json["query"].as_str().unwrap_or("").to_string(),
+        ipv6: None,
+        hostname: json["reverse"].as_str().map(|s| s.to_string()),
+        country: json["country"].as_str().unwrap_or("").to_string(),
+        country_code: json["countryCode"].as_str().unwrap_or("").to_string(),
+        region: json["regionName"].as_str().unwrap_or("").to_string(),
+        city: json["city"].as_str().unwrap_or("").to_string(),
+        isp: json["isp"].as_str().unwrap_or("").to_string(),
+        org: json["org"].as_str().unwrap_or("").to_string(),
+        asn,
+        as_name: json["asname"].as_str().unwrap_or("").to_string(),
+        timezone: String::new(),
+        is_proxy: json["proxy"].as_bool().unwrap_or(false),
+        is_hosting: json["hosting"].as_bool().unwrap_or(false),
+    })
+}
+
+fn parse_ipwhois_json(text: &str) -> Result<IpInfo, String> {
+    let json: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("Erro JSON: {}", e))?;
+
+    if json.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return Err("API retornou erro".to_string());
+    }
+
+    let asn = json["asn"]
+        .as_str()
+        .or_else(|| {
+            json["asn"]
+                .as_i64()
+                .map(|v| Box::leak(v.to_string().into_boxed_str()))
+                .map(|s| s as &str)
+        })
+        .unwrap_or("")
+        .to_string();
+    let asn_str = if asn.starts_with("AS") {
+        asn.clone()
+    } else {
+        format!("AS{}", asn)
+    };
 
     Ok(IpInfo {
-        ipv4,
-        ipv6,
-        hostname,
-        country,
-        country_code,
-        region,
-        city,
-        isp,
-        org,
+        ipv4: json["ip"].as_str().unwrap_or("").to_string(),
+        ipv6: json["ipv6"].as_str().map(|s| s.to_string()),
+        hostname: None,
+        country: json["country"].as_str().unwrap_or("").to_string(),
+        country_code: json["country_code"].as_str().unwrap_or("").to_string(),
+        region: json["region"].as_str().unwrap_or("").to_string(),
+        city: json["city"].as_str().unwrap_or("").to_string(),
+        isp: json["isp"]
+            .as_str()
+            .or_else(|| json["asn_org"].as_str())
+            .unwrap_or("")
+            .to_string(),
+        org: json["org"]
+            .as_str()
+            .or_else(|| json["asn_org"].as_str())
+            .unwrap_or("")
+            .to_string(),
+        asn: asn_str,
+        as_name: json["asn_org"].as_str().unwrap_or("").to_string(),
+        timezone: json["timezone"].as_str().unwrap_or("").to_string(),
+        is_proxy: json["proxy"].as_bool().unwrap_or(false),
+        is_hosting: json["hosting"].as_bool().unwrap_or(false),
+    })
+}
+
+fn parse_ipinfo_json(text: &str) -> Result<IpInfo, String> {
+    let json: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("Erro JSON: {}", e))?;
+
+    let org_str = json["org"].as_str().unwrap_or("");
+    let (asn, as_name) = if org_str.contains(' ') {
+        let parts: Vec<&str> = org_str.splitn(2, ' ').collect();
+        (parts[0].to_string(), parts[1].to_string())
+    } else {
+        (org_str.to_string(), String::new())
+    };
+
+    Ok(IpInfo {
+        ipv4: json["ip"].as_str().unwrap_or("").to_string(),
+        ipv6: None,
+        hostname: None,
+        country: json["country"].as_str().unwrap_or("").to_string(),
+        country_code: json["country"].as_str().unwrap_or("").to_string(),
+        region: json["region"].as_str().unwrap_or("").to_string(),
+        city: json["city"].as_str().unwrap_or("").to_string(),
+        isp: json["org"].as_str().unwrap_or("").to_string(),
+        org: json["org"].as_str().unwrap_or("").to_string(),
         asn,
         as_name,
-        timezone: String::new(),
-        is_proxy,
-        is_hosting,
+        timezone: json["timezone"].as_str().unwrap_or("").to_string(),
+        is_proxy: false,
+        is_hosting: false,
     })
+}
+
+fn parse_ipapi_co_json(text: &str) -> Result<IpInfo, String> {
+    let json: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("Erro JSON: {}", e))?;
+
+    Ok(IpInfo {
+        ipv4: json["ip"].as_str().unwrap_or("").to_string(),
+        ipv6: None,
+        hostname: None,
+        country: json["country_name"].as_str().unwrap_or("").to_string(),
+        country_code: json["country"].as_str().unwrap_or("").to_string(),
+        region: json["region"].as_str().unwrap_or("").to_string(),
+        city: json["city"].as_str().unwrap_or("").to_string(),
+        isp: json["org"].as_str().unwrap_or("").to_string(),
+        org: json["org"].as_str().unwrap_or("").to_string(),
+        asn: json["asn"].as_str().unwrap_or("").to_string(),
+        as_name: String::new(),
+        timezone: json["timezone"].as_str().unwrap_or("").to_string(),
+        is_proxy: false,
+        is_hosting: false,
+    })
+}
+
+pub fn get_public_ip_info() -> Result<IpInfo, String> {
+    let mut last_err;
+
+    // API 1: ip-api.com
+    match fetch_json("https://ip-api.com/json/?fields=status,country,countryCode,region,regionName,city,isp,org,as,asname,proxy,hosting,query,reverse") {
+        Ok(text) => {
+            match parse_ip_api_json(&text) {
+                Ok(info) => {
+                    let ipv6 = get_ipv6_quiet();
+                    return Ok(IpInfo { ipv6, ..info });
+                }
+                Err(e) => last_err = format!("ip-api: {}", e),
+            }
+        }
+        Err(e) => last_err = format!("ip-api: {}", e),
+    }
+
+    // API 2: ipwho.is
+    match fetch_json("https://ipwho.is/") {
+        Ok(text) => match parse_ipwhois_json(&text) {
+            Ok(info) => {
+                let ipv6 = get_ipv6_quiet();
+                return Ok(IpInfo { ipv6, ..info });
+            }
+            Err(e) => last_err = format!("{}; ipwho.is: {}", last_err, e),
+        },
+        Err(e) => last_err = format!("{}; ipwho.is: {}", last_err, e),
+    }
+
+    // API 3: ipinfo.io
+    match fetch_json("https://ipinfo.io/json") {
+        Ok(text) => match parse_ipinfo_json(&text) {
+            Ok(info) => {
+                let ipv6 = get_ipv6_quiet();
+                return Ok(IpInfo { ipv6, ..info });
+            }
+            Err(e) => last_err = format!("{}; ipinfo: {}", last_err, e),
+        },
+        Err(e) => last_err = format!("{}; ipinfo: {}", last_err, e),
+    }
+
+    // API 4: ipapi.co
+    match fetch_json("https://ipapi.co/json/") {
+        Ok(text) => match parse_ipapi_co_json(&text) {
+            Ok(info) => {
+                let ipv6 = get_ipv6_quiet();
+                return Ok(IpInfo { ipv6, ..info });
+            }
+            Err(e) => last_err = format!("{}; ipapi.co: {}", last_err, e),
+        },
+        Err(e) => last_err = format!("{}; ipapi.co: {}", last_err, e),
+    }
+
+    Err(format!(
+        "Todas as APIs de geolocalização falharam: {}",
+        last_err
+    ))
 }
 
 fn get_ipv6_quiet() -> Option<String> {
@@ -288,5 +448,9 @@ fn get_ipv6_quiet() -> Option<String> {
     let mut body = resp.into_body();
     let ip = body.read_to_string().ok()?;
     let ip = ip.trim().to_string();
-    if ip.is_empty() { None } else { Some(ip) }
+    if ip.is_empty() {
+        None
+    } else {
+        Some(ip)
+    }
 }

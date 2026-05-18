@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>King Analiser — Network Tools</title>
+    <title>KingNetworkTools</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <aside id="sidebar">
         <div class="sidebar-logo">
           <div class="logo-icon">K</div>
-          <span class="logo-text">King Analiser</span>
+          <span class="logo-text">KingNetworkTools</span>
         </div>
         <nav id="sidebar-nav">
           <button class="nav-item active" data-view="dashboard">
@@ -45,10 +45,6 @@
           <button class="nav-item" data-view="http">
             <span class="nav-icon">&#x2197;</span>
             <span>HTTP Timing</span>
-          </button>
-          <button class="nav-item" data-view="mtr">
-            <span class="nav-icon">&#x2B21;</span>
-            <span>MTR</span>
           </button>
           <button class="nav-item" data-view="report">
             <span class="nav-icon">&#x2637;</span>
@@ -106,15 +102,39 @@
                 <div class="card-sub">--</div>
               </div>
             </div>
-            <div class="card full-width" style="margin-top:16px">
-              <div class="card-label" style="margin-bottom:8px">Status da Conexão</div>
-              <div class="connection-bar">
-                <div class="conn-segment active" style="background:#4caf50" title="Gateway"></div>
-                <div class="conn-segment active" style="background:#4caf50" title="DNS"></div>
-                <div class="conn-segment active" style="background:#4caf50" title="Internet"></div>
-                <div class="conn-segment active" style="background:#ff9800" title="Jitter"></div>
-                <div class="conn-label">
-                  <span>Gateway</span><span>DNS</span><span>Internet</span><span>Estabilidade</span>
+            <div class="dashboard-actions">
+              <button id="btn-dashboard-report" class="btn btn-gold">Gerar Relatório Completo</button>
+            </div>
+            <div class="card full-width connection-status">
+              <div class="card-label">Status da Conexão</div>
+              <div class="status-grid">
+                <div class="status-card unknown" id="status-gateway">
+                  <span class="status-card-dot"></span>
+                  <div>
+                    <div class="status-card-title">Gateway</div>
+                    <div class="status-card-value">Verificando...</div>
+                  </div>
+                </div>
+                <div class="status-card unknown" id="status-dns">
+                  <span class="status-card-dot"></span>
+                  <div>
+                    <div class="status-card-title">DNS</div>
+                    <div class="status-card-value">Verificando...</div>
+                  </div>
+                </div>
+                <div class="status-card unknown" id="status-internet">
+                  <span class="status-card-dot"></span>
+                  <div>
+                    <div class="status-card-title">Internet</div>
+                    <div class="status-card-value">Verificando...</div>
+                  </div>
+                </div>
+                <div class="status-card unknown" id="status-stability">
+                  <span class="status-card-dot"></span>
+                  <div>
+                    <div class="status-card-title">Estabilidade</div>
+                    <div class="status-card-value">Verificando...</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -200,16 +220,6 @@
               <button id="btn-http" class="btn btn-gold">Testar HTTP Timing</button>
             </div>
             <div id="http-output" class="tool-output"></div>
-          </div>
-
-          <div id="view-mtr" class="view">
-            <div class="tool-header">
-              <div class="input-row">
-                <input type="text" id="mtr-host" placeholder="ex: 8.8.8.8" value="8.8.8.8" />
-                <button id="btn-mtr-run" class="btn btn-gold">Executar MTR</button>
-              </div>
-            </div>
-            <div id="mtr-output" class="tool-output"></div>
           </div>
 
           <div id="view-report" class="view">

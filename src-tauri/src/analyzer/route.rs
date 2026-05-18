@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Hop {
@@ -34,6 +34,8 @@ pub fn ping_host(host: &str, count: u8) -> Result<PingResult, String> {
 
     let (cmd, args): (&str, Vec<&str>) = if cfg!(target_os = "windows") {
         ("ping", vec!["-n", &count_str, host])
+    } else if count == 1 {
+        ("ping", vec!["-c", "1", host])
     } else {
         ("ping", vec!["-c", &count_str, "-i", "0.2", host])
     };
@@ -45,7 +47,22 @@ pub fn ping_host(host: &str, count: u8) -> Result<PingResult, String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Ping falhou: {}", stderr.trim()));
+        let stderr_trimmed = stderr.trim();
+        // Some systems output ping stats even when the process exits with error
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !stdout.trim().is_empty() && stdout.contains("packets transmitted") {
+            if let Ok(result) = parse_ping_output(&stdout, count) {
+                return Ok(result);
+            }
+        }
+        return Err(format!(
+            "Ping falhou: {}",
+            if stderr_trimmed.is_empty() {
+                "host inalcançável ou bloqueado"
+            } else {
+                stderr_trimmed
+            }
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -59,8 +76,10 @@ pub fn parse_ping_output(output: &str, count: u8) -> Result<PingResult, String> 
         return parse_ping_output_windows(output, count, host);
     }
 
-    let re_loss = Regex::new(r"(\d+)\s+packets transmitted,\s+(\d+)\s+(received|packets received)").unwrap();
-    let re_rtt = Regex::new(r"rtt min/avg/max/mdev\s*=\s*([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)").unwrap();
+    let re_loss =
+        Regex::new(r"(\d+)\s+packets transmitted,\s+(\d+)\s+(received|packets received)").unwrap();
+    let re_rtt =
+        Regex::new(r"rtt min/avg/max/mdev\s*=\s*([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)").unwrap();
 
     let mut transmitted: u8 = count;
     let mut received: u8 = 0;
@@ -110,10 +129,18 @@ pub fn parse_ping_output(output: &str, count: u8) -> Result<PingResult, String> 
 }
 
 fn parse_ping_output_windows(output: &str, count: u8, host: String) -> Result<PingResult, String> {
-    let re_loss = Regex::new(r"Enviados\s*=\s*(\d+),\s*Recebidos\s*=\s*(\d+),\s*Perdidos\s*=\s*\d+\s*\((\d+)%").unwrap();
-    let re_loss_en = Regex::new(r"Sent\s*=\s*(\d+),\s*Received\s*=\s*(\d+),\s*Lost\s*=\s*\d+\s*\((\d+)%").unwrap();
-    let re_rtt = Regex::new(r"M[íi]nimo\s*=\s*(\d+).*?M[áa]ximo\s*=\s*(\d+).*?M[ée]dia\s*=\s*(\d+)").unwrap();
-    let re_rtt_en = Regex::new(r"Minimum\s*=\s*(\d+).*?Maximum\s*=\s*(\d+).*?Average\s*=\s*(\d+)").unwrap();
+    let re_loss = Regex::new(
+        r"Enviados\s*=\s*(\d+),\s*Recebidos\s*=\s*(\d+),\s*Perdidos\s*=\s*\d+\s*\((\d+)%",
+    )
+    .unwrap();
+    let re_loss_en =
+        Regex::new(r"Sent\s*=\s*(\d+),\s*Received\s*=\s*(\d+),\s*Lost\s*=\s*\d+\s*\((\d+)%")
+            .unwrap();
+    let re_rtt =
+        Regex::new(r"M[íi]nimo\s*=\s*(\d+).*?M[áa]ximo\s*=\s*(\d+).*?M[ée]dia\s*=\s*(\d+)")
+            .unwrap();
+    let re_rtt_en =
+        Regex::new(r"Minimum\s*=\s*(\d+).*?Maximum\s*=\s*(\d+).*?Average\s*=\s*(\d+)").unwrap();
 
     let mut transmitted: u8 = count;
     let mut received: u8 = 0;
@@ -144,7 +171,11 @@ fn parse_ping_output_windows(output: &str, count: u8, host: String) -> Result<Pi
         }
     }
 
-    let jitter_ms = if max_ms > min_ms { (max_ms - min_ms) / 2.0 } else { 0.0 };
+    let jitter_ms = if max_ms > min_ms {
+        (max_ms - min_ms) / 2.0
+    } else {
+        0.0
+    };
 
     let (quality, quality_color) = classify_quality(avg_ms, loss_pct, jitter_ms);
 
@@ -193,32 +224,115 @@ pub fn trace_route(host: &str) -> Result<Vec<Hop>, String> {
         return trace_route_tracert(host);
     }
 
-    let max_hops_str = MAX_HOPS.to_string();
-    let cmd = "traceroute";
-    let args = vec!["-n", "-q", "3", "-w", "1", "-m", &max_hops_str, host];
+    let has_traceroute = std::process::Command::new("which")
+        .arg("traceroute")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
 
-    match std::process::Command::new(cmd).args(&args).output() {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Ok(hops) = parse_traceroute_output(&stdout) {
-                return Ok(hops);
+    let mut best_hops: Option<Vec<Hop>> = None;
+    let mut errors = Vec::new();
+
+    if has_traceroute {
+        let max_hops_str = MAX_HOPS.to_string();
+        let candidates: Vec<Vec<&str>> = vec![
+            vec!["-n", "-q", "3", "-w", "2", "-m", &max_hops_str, host],
+            vec![
+                "-T",
+                "-p",
+                "443",
+                "-n",
+                "-q",
+                "3",
+                "-w",
+                "2",
+                "-m",
+                &max_hops_str,
+                host,
+            ],
+            vec!["-I", "-n", "-q", "3", "-w", "2", "-m", &max_hops_str, host],
+        ];
+
+        for args in candidates {
+            match std::process::Command::new("traceroute")
+                .args(&args)
+                .output()
+            {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if let Ok(hops) = parse_traceroute_output(&stdout) {
+                        if route_response_score(&hops)
+                            > route_response_score(best_hops.as_deref().unwrap_or(&[]))
+                        {
+                            best_hops = Some(hops);
+                        }
+                    }
+                    if !stderr.trim().is_empty() {
+                        errors.push(stderr.trim().to_string());
+                    }
+                }
+                Err(e) => {
+                    errors.push(e.to_string());
+                }
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return trace_route_tracepath(host);
-        }
-        _ => {}
     }
 
-    trace_route_tracepath(host)
+    if let Ok(hops) = trace_route_tracepath(host) {
+        if route_response_score(&hops) > route_response_score(best_hops.as_deref().unwrap_or(&[])) {
+            best_hops = Some(hops);
+        }
+    }
+
+    if let Some(hops) = best_hops {
+        if !hops.is_empty() {
+            return Ok(trim_trailing_no_reply(hops));
+        }
+    }
+
+    let detail = if errors.is_empty() {
+        "sem resposta dos comandos de rota".to_string()
+    } else {
+        errors.join("; ")
+    };
+    Err(format!(
+        "Falha ao executar traceroute/tracepath: {}",
+        detail
+    ))
 }
 
-pub fn parse_traceroute_output(output: &str) -> Result<Vec<Hop>, String> {
+fn route_response_score(hops: &[Hop]) -> usize {
+    hops.iter()
+        .filter(|h| h.address != "*" && h.status != "no_reply")
+        .count()
+}
+
+fn trim_trailing_no_reply(mut hops: Vec<Hop>) -> Vec<Hop> {
+    while hops.len() > 1 && hops.last().map_or(false, |h| h.status == "no_reply") {
+        hops.pop();
+    }
+    hops
+}
+
+fn strip_ansi(s: &str) -> String {
+    let re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap();
+    re.replace_all(s, "").to_string()
+}
+
+pub fn parse_traceroute_output(raw: &str) -> Result<Vec<Hop>, String> {
+    let output = strip_ansi(raw);
     let mut hops = Vec::new();
 
     for line in output.lines() {
         let line = line.trim();
-        if line.is_empty() || !line.chars().next().map_or(true, |c| c.is_ascii_digit()) {
+        if line.is_empty() {
+            continue;
+        }
+
+        // Skip header lines
+        let first = line.chars().next();
+        if first.map_or(true, |c| !c.is_ascii_digit() && c != ' ') {
             continue;
         }
 
@@ -227,13 +341,58 @@ pub fn parse_traceroute_output(output: &str) -> Result<Vec<Hop>, String> {
             continue;
         }
 
-        let Ok(hop_num) = parts[0].parse::<u32>() else { continue };
-        let addr = parts[1].trim_end_matches(':').to_string();
+        let Ok(hop_num) = parts[0].parse::<u32>() else {
+            continue;
+        };
 
-        if addr == "*" || addr == "???" {
+        // Check if entire hop is no reply
+        if parts
+            .iter()
+            .skip(1)
+            .all(|p| *p == "*" || *p == "???" || p.ends_with("ms"))
+        {
+            // Might be "* * *" which means no reply
+            if parts[1] == "*" {
+                hops.push(Hop {
+                    hop_number: hop_num,
+                    address: "*".to_string(),
+                    hostname: None,
+                    avg_ms: 0.0,
+                    min_ms: 0.0,
+                    max_ms: 0.0,
+                    loss_pct: 100.0,
+                    status: "no_reply".to_string(),
+                });
+                continue;
+            }
+        }
+
+        // Find the address - it's the first non-numeric token after hop number
+        // that isn't an RTT value
+        let mut addr_idx = 1;
+        let mut addr = String::new();
+        for (i, part) in parts.iter().enumerate().skip(1) {
+            if *part == "*" || *part == "???" {
+                addr = "*".to_string();
+                addr_idx = i;
+                break;
+            }
+            // Check if it looks like an IP or hostname (not a number with possible decimal)
+            if !part.parse::<f32>().is_ok() && !part.ends_with("ms") {
+                addr = part.to_string();
+                addr_idx = i;
+                break;
+            }
+        }
+
+        if addr.is_empty() || addr == "*" {
             hops.push(Hop {
                 hop_number: hop_num,
-                address: "*".to_string(),
+                address: if addr.is_empty() {
+                    "*".to_string()
+                } else {
+                    addr
+                },
                 hostname: None,
                 avg_ms: 0.0,
                 min_ms: 0.0,
@@ -244,26 +403,40 @@ pub fn parse_traceroute_output(output: &str) -> Result<Vec<Hop>, String> {
             continue;
         }
 
-        let rtts: Vec<f32> = parts[2..]
+        // Collect RTT values - look for pairs of (number, "ms") after the address
+        let rtts: Vec<f32> = parts[addr_idx + 1..]
             .windows(2)
-            .filter(|pair| pair[1] == "ms")
-            .filter_map(|pair| pair[0].parse::<f32>().ok())
+            .filter(|pair| pair[1] == "ms" || pair[1].starts_with("ms"))
+            .filter_map(|pair| {
+                let val = pair[0].trim_end_matches(|c: char| !c.is_ascii_digit() && c != '.');
+                if val == "<1" || val == "<" {
+                    return Some(0.5);
+                }
+                val.parse::<f32>().ok()
+            })
             .collect();
 
         let min_ms = rtts.iter().cloned().fold(f32::MAX, f32::min);
         let max_ms = rtts.iter().cloned().fold(0.0f32, f32::max);
-        let avg_ms = if !rtts.is_empty() { rtts.iter().sum::<f32>() / rtts.len() as f32 } else { 0.0 };
-        let loss_pct = if parts.len() > 2 {
-            let total = parts[2..].len();
-            let replies = rtts.len();
-            if total > 0 { (total - replies) as f32 / total as f32 * 100.0 } else { 0.0 }
+        let avg_ms = if !rtts.is_empty() {
+            rtts.iter().sum::<f32>() / rtts.len() as f32
+        } else {
+            0.0
+        };
+
+        // Calculate loss for this hop
+        let expected = parts[addr_idx + 1..]
+            .iter()
+            .filter(|s| **s != "ms" && s.ends_with("ms") || s.parse::<f32>().is_ok())
+            .count();
+        let loss_pct = if expected > 0 {
+            (expected - rtts.len()) as f32 / expected as f32 * 100.0
         } else {
             0.0
         };
         let min_ms = if min_ms == f32::MAX { 0.0 } else { min_ms };
 
         let hostname = resolve_hostname(&addr);
-
         let status = classify_hop_status(avg_ms, loss_pct, !rtts.is_empty());
 
         hops.push(Hop {
@@ -302,26 +475,32 @@ fn reverse_dns_std(ip: &std::net::IpAddr) -> Option<String> {
     if cfg!(target_os = "windows") {
         let output = std::process::Command::new("nslookup")
             .args([&ip_str])
-            .output().ok()?;
+            .output()
+            .ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if line.contains("Name:") {
                 if let Some(name) = line.split(':').nth(1) {
                     let name = name.trim().trim_end_matches('.').to_string();
-                    if !name.is_empty() { return Some(name); }
+                    if !name.is_empty() {
+                        return Some(name);
+                    }
                 }
             }
         }
     } else {
         let output = std::process::Command::new("host")
             .args([&ip_str])
-            .output().ok()?;
+            .output()
+            .ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if let Some(pos) = line.find("domain name pointer") {
                 let rest = &line[pos + "domain name pointer".len()..];
                 let name = rest.trim().trim_end_matches('.').to_string();
-                if !name.is_empty() { return Some(name); }
+                if !name.is_empty() {
+                    return Some(name);
+                }
             }
         }
     }
@@ -358,12 +537,18 @@ fn parse_tracert_output(output: &str) -> Result<Vec<Hop>, String> {
     let re_line = Regex::new(r"^\s*(\d+)").unwrap();
 
     for line in output.lines() {
-        if !re_line.is_match(line) { continue; }
+        if !re_line.is_match(line) {
+            continue;
+        }
 
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 2 { continue; }
+        if parts.len() < 2 {
+            continue;
+        }
 
-        let Ok(hop_num) = parts[0].parse::<u32>() else { continue };
+        let Ok(hop_num) = parts[0].parse::<u32>() else {
+            continue;
+        };
 
         if parts[1] == "*" || line.contains("Tempo limite") || line.contains("Request timed out") {
             hops.push(Hop {
@@ -453,13 +638,20 @@ pub fn parse_tracepath_output(output: &str) -> Result<Vec<Hop>, String> {
         if let Some(caps) = re.captures(line) {
             let hop_num: u32 = caps[1].parse().unwrap_or(0);
             let addr_raw = caps[2].trim();
-            let addr = if addr_raw == "no reply" || addr_raw.starts_with("LOCAL") || addr_raw.starts_with('[') {
+            let addr = if addr_raw == "no reply"
+                || addr_raw.starts_with("LOCAL")
+                || addr_raw.starts_with('[')
+            {
                 "*".to_string()
             } else {
                 addr_raw.to_string()
             };
 
-            let has_reply = caps.get(3).map_or(false, |m| m.as_str() != "no reply" && !m.as_str().is_empty());
+            let latency_ms = caps
+                .get(3)
+                .and_then(|m| m.as_str().trim_end_matches("ms").parse::<f32>().ok())
+                .unwrap_or(0.0);
+            let has_reply = latency_ms > 0.0;
 
             let hostname = resolve_hostname(&addr);
 
@@ -467,11 +659,15 @@ pub fn parse_tracepath_output(output: &str) -> Result<Vec<Hop>, String> {
                 hop_number: hop_num,
                 address: addr,
                 hostname,
-                avg_ms: 0.0,
-                min_ms: 0.0,
-                max_ms: 0.0,
+                avg_ms: latency_ms,
+                min_ms: latency_ms,
+                max_ms: latency_ms,
                 loss_pct: if has_reply { 0.0 } else { 100.0 },
-                status: if has_reply { "ok".to_string() } else { "no_reply".to_string() },
+                status: classify_hop_status(
+                    latency_ms,
+                    if has_reply { 0.0 } else { 100.0 },
+                    has_reply,
+                ),
             });
         }
     }
@@ -484,9 +680,66 @@ pub fn parse_tracepath_output(output: &str) -> Result<Vec<Hop>, String> {
 }
 
 #[allow(dead_code)]
+pub fn ping_continuous_parse_line(line: &str) -> Option<f32> {
+    let line = line.trim();
+
+    fn parse_after_marker(line: &str, marker: &str) -> Option<f32> {
+        let pos = line.find(marker)?;
+        let rest = &line[pos + marker.len()..];
+        let end = rest
+            .find(|c: char| c == ' ' || c == 'm' || (!c.is_ascii_digit() && c != '.'))
+            .unwrap_or(rest.len());
+        let val = rest[..end].trim();
+        if val.is_empty() {
+            None
+        } else if marker.ends_with('<') && val == "1" {
+            Some(0.5)
+        } else {
+            val.parse::<f32>().ok()
+        }
+    }
+
+    for marker in ["time=", "time<", "tempo=", "tempo<"] {
+        if let Some(ms) = parse_after_marker(line, marker) {
+            return Some(ms);
+        }
+    }
+
+    // Linux: time 12.3 ms (some variants)
+    if let Some(pos) = line.find("time ") {
+        let rest = &line[pos + 5..];
+        let end = rest
+            .find(|c: char| c == ' ' || c == 'm')
+            .unwrap_or(rest.len());
+        return rest[..end].parse::<f32>().ok();
+    }
+
+    // Any line with "bytes from" or "bytes=" and a number followed by "ms"
+    if line.contains("bytes from") || line.contains("bytes=") || line.contains("icmp_seq") {
+        for word in line.split_whitespace() {
+            if word.ends_with("ms") {
+                let num = word.trim_end_matches("ms");
+                if num == "<1" {
+                    return Some(0.5);
+                }
+                if let Ok(v) = num.parse::<f32>() {
+                    return Some(v);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[allow(dead_code)]
 pub fn classify_latency(ms: f32) -> &'static str {
-    if ms < 5.0 { "Excelente" }
-    else if ms < 30.0 { "Bom" }
-    else if ms < 80.0 { "Aceitável" }
-    else { "Ruim" }
+    if ms < 5.0 {
+        "Excelente"
+    } else if ms < 30.0 {
+        "Bom"
+    } else if ms < 80.0 {
+        "Aceitável"
+    } else {
+        "Ruim"
+    }
 }

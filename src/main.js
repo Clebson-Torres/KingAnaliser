@@ -1,9 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 
 /* ══════════════════════════════════════════════
-   King Analiser — Main Application
+   KingNetworkTools — Main Application
    ══════════════════════════════════════════════ */
 
 // ─── DOM refs ───
@@ -13,7 +14,6 @@ const viewContainer = D("view-container");
 const toastContainer = D("toast-container");
 const hostInput = D("host-input");
 const trHost = D("tr-host-input");
-const mtrHost = D("mtr-host");
 const portsHost = D("ports-host");
 const dnsInput = D("dns-input");
 const subnetInput = D("subnet-input");
@@ -92,6 +92,24 @@ function toTable(headers, rows) {
   return out;
 }
 
+function plainTable(headers, rows) {
+  const safeRows = rows.length ? rows : [["-".repeat(headers.length)]];
+  const colWidths = headers.map((h, i) => Math.max(String(h).length, ...safeRows.map(r => String(r[i] ?? "").length)));
+  const sep = "+-" + colWidths.map(w => "-".repeat(w)).join("-+-") + "-+";
+  const formatRow = (row) => "| " + headers.map((_, i) => String(row[i] ?? "").padEnd(colWidths[i])).join(" | ") + " |";
+  return [
+    sep,
+    formatRow(headers),
+    sep,
+    ...rows.map(formatRow),
+    sep,
+  ].join("\n");
+}
+
+function pct(v) {
+  return typeof v === "number" ? v.toFixed(1) + "%" : "-";
+}
+
 function qualityClass(val, good, warn) {
   if (val <= good) return "quality-good";
   if (val <= warn) return "quality-warn";
@@ -113,6 +131,15 @@ function setRunning(key, running) {
 
 function isBusy(key) { return !!isRunning[key]; }
 
+function setStatusCard(id, state, text) {
+  const el = D(id);
+  if (!el) return;
+  el.classList.remove("good", "warn", "bad", "unknown");
+  el.classList.add(state);
+  const value = el.querySelector(".status-card-value");
+  if (value) value.textContent = text;
+}
+
 async function withLoading(msg, key, outId, fn) {
   if (isBusy(key)) return;
   setRunning(key, true);
@@ -129,6 +156,11 @@ async function withLoading(msg, key, outId, fn) {
 // ─── Dashboard ───
 async function loadDashboard() {
   try {
+    setStatusCard("status-gateway", "unknown", "Verificando...");
+    setStatusCard("status-dns", "unknown", "Verificando...");
+    setStatusCard("status-internet", "unknown", "Verificando...");
+    setStatusCard("status-stability", "unknown", "Verificando...");
+
     const [ifaces, ipPub] = await Promise.all([
       invoke("get_network_interfaces"),
       invoke("get_public_ip").catch(() => "---"),
@@ -141,6 +173,7 @@ async function loadDashboard() {
     }
 
     D("card-public-ip").querySelector(".card-value").textContent = ipPub;
+    setStatusCard("status-internet", ipPub === "---" ? "bad" : "good", ipPub === "---" ? "Sem IP público" : "Online");
 
     try {
       const info = await invoke("get_gateway_info");
@@ -153,8 +186,13 @@ async function loadDashboard() {
           gatewayWarning.textContent = "⚠ " + info.warning;
           gatewayWarning.classList.remove("hidden");
         }
+        const state = gw.reachable ? (info.has_multiple ? "warn" : "good") : "bad";
+        const label = gw.reachable ? lat + (info.has_multiple ? " / múltiplo" : "") : "Inalcançável";
+        setStatusCard("status-gateway", state, label);
       }
-    } catch {}
+    } catch {
+      setStatusCard("status-gateway", "bad", "Não detectado");
+    }
 
     try {
       const p = await invoke("ping", { host: "8.8.8.8", count: 3 });
@@ -162,7 +200,10 @@ async function loadDashboard() {
       D("card-latency").querySelector(".card-sub").textContent = p.quality + " | perda " + p.loss_pct.toFixed(0) + "%";
       const dot = D("status-indicator");
       dot.className = "status-dot " + (p.quality_color === "red" ? "red" : p.quality_color === "yellow" ? "yellow" : "green");
-    } catch {}
+      setStatusCard("status-stability", p.quality_color === "red" ? "bad" : p.quality_color === "yellow" ? "warn" : "good", p.quality + " / perda " + p.loss_pct.toFixed(0) + "%");
+    } catch {
+      setStatusCard("status-stability", "bad", "Ping falhou");
+    }
 
     const os = navigator.platform || "desconhecido";
     D("card-uptime").querySelector(".card-value").textContent = "Online";
@@ -171,7 +212,10 @@ async function loadDashboard() {
     try {
       const dns = await invoke("dns_lookup", { host: "google.com" });
       D("card-dns").querySelector(".card-value").textContent = dns.addresses[0] || "---";
-    } catch {}
+      setStatusCard("status-dns", dns.addresses?.length ? "good" : "bad", dns.addresses?.length ? "Resolvido" : "Sem resposta");
+    } catch {
+      setStatusCard("status-dns", "bad", "Falha DNS");
+    }
 
   } catch (e) {
     console.error("Dashboard load error:", e);
@@ -225,15 +269,19 @@ async function showTraceroute() {
     appendOutput("traceroute-output", toTable(["#", "IP", "Hostname", "Min", "Avg", "Max", "Perda%", "Status"], rows));
     const crit = hops.filter(h => h.status === "critical");
     if (crit.length) appendOutput("traceroute-output", '\n<span class="quality-bad">⚠ ' + crit.length + " hop(s) crítico(s)</span>");
+    const replies = hops.filter(h => h.address !== "*" && h.status !== "no_reply");
+    if (hops.length <= 1 || replies.length <= 1) {
+      appendOutput("traceroute-output", '\n<span class="quality-warn">Rota parcialmente filtrada. O app tentou traceroute padrão, TCP/443, ICMP e tracepath; firewalls no caminho podem ocultar os hops intermediários.</span>');
+    }
   });
 }
 
 // ─── MTR ───
 async function showMtr() {
-  const host = mtrHost.value.trim() || "8.8.8.8";
-  await withLoading("MTR...", "mtr", "mtr-output", async () => {
-    clearOutput("mtr-output");
-    appendOutput("mtr-output", "  Executando MTR com 5 ciclos...\n");
+  const host = trHost.value.trim() || "8.8.8.8";
+  await withLoading("MTR...", "mtr", "traceroute-output", async () => {
+    clearOutput("traceroute-output");
+    appendOutput("traceroute-output", "  Executando MTR para " + host + " com 5 ciclos...\n");
     const hops = await invoke("run_mtr", { host, cycles: 5 });
     const rows = hops.map(h => [
       String(h.hop), h.host,
@@ -242,7 +290,11 @@ async function showMtr() {
       h.best_ms.toFixed(1) + "ms", h.worst_ms.toFixed(1) + "ms", h.jitter_ms.toFixed(1) + "ms",
       '<span class="' + (h.quality === "ok" ? "quality-good" : h.quality === "warning" ? "quality-warn" : "quality-bad") + '">' + h.quality + "</span>",
     ]);
-    appendOutput("mtr-output", toTable(["Hop", "Host", "Perda", "Média", "Melhor", "Pior", "Jitter", "Qualid."], rows));
+    appendOutput("traceroute-output", toTable(["Hop", "Host", "Perda", "Média", "Melhor", "Pior", "Jitter", "Qualid."], rows));
+    const replies = hops.filter(h => h.host !== "*" && h.quality !== "no_reply" && h.loss_pct < 100);
+    if (hops.length <= 1 || replies.length <= 1) {
+      appendOutput("traceroute-output", '\n<span class="quality-warn">MTR recebeu poucos hops. Se o binário mtr não tiver permissão/socket disponível, o app usa traceroute como fallback.</span>');
+    }
   });
 }
 
@@ -409,61 +461,125 @@ async function showFullReport() {
 
     try {
       const ifaces = await invoke("get_network_interfaces");
-      ipLocalText = ifaces.map(i => "  " + i.name + ": " + i.ip + " (" + (i.is_up ? "UP" : "DOWN") + ")").join("\n");
-    } catch (e) { ipLocalText = "  [ERRO] " + e; }
+      ipLocalText = plainTable(["Interface", "IP", "MAC", "Status"], ifaces.map(i => [
+        i.name, i.ip || "-", i.mac || "-", i.is_up ? "UP" : "DOWN",
+      ]));
+    } catch (e) { ipLocalText = "[ERRO] " + e; }
 
     try {
       const info = await invoke("get_public_ip_info");
-      ipPubText = "  IPv4: " + info.ipv4 + "\n  ISP: " + info.isp + "\n  Local: " + info.city + ", " + info.country;
-    } catch { try { ipPubText = "  " + (await invoke("get_public_ip")); } catch {} }
+      ipPubText = [
+        "IPv4:       " + (info.ipv4 || "-"),
+        "IPv6:       " + (info.ipv6 || "-"),
+        "Hostname:   " + (info.hostname || "-"),
+        "Local:      " + [info.city, info.region, info.country].filter(Boolean).join(", "),
+        "Pais:       " + (info.country || "-") + (info.country_code ? " (" + info.country_code + ")" : ""),
+        "ISP:        " + (info.isp || "-"),
+        "Org:        " + (info.org || "-"),
+        "ASN:        " + (info.asn || "-") + (info.as_name ? " - " + info.as_name : ""),
+        "Timezone:   " + (info.timezone || "-"),
+        "Proxy:      " + (info.is_proxy ? "sim" : "nao"),
+        "Datacenter: " + (info.is_hosting ? "sim" : "nao"),
+      ].join("\n");
+    } catch {
+      try { ipPubText = "IP publico: " + (await invoke("get_public_ip")); }
+      catch (e) { ipPubText = "[ERRO] " + e; }
+    }
 
     try {
       const d = await invoke("dns_lookup", { host });
-      dnsText = "  " + d.host + " -> " + d.addresses.join(", ");
-    } catch (e) { dnsText = "  [ERRO] " + e; }
+      dnsText = "Host: " + d.host + "\nEnderecos:\n" + d.addresses.map(ip => "  - " + ip).join("\n") + "\nReverso: " + (d.reverse || "-");
+    } catch (e) { dnsText = "[ERRO] " + e; }
 
     try {
       const p = await invoke("ping", { host, count: 10 });
-      pingText = "  Perda: " + p.loss_pct + "% | Média: " + p.avg_ms.toFixed(1) + "ms | " + p.quality;
-    } catch (e) { pingText = "  [ERRO] " + e; }
+      pingText = [
+        "Host: " + p.host,
+        plainTable(
+          ["Enviados", "Recebidos", "Perdidos", "Perda", "Min", "Media", "Max", "Jitter", "Qualidade"],
+          [[
+            p.packets_sent,
+            p.packets_received,
+            p.packets_sent - p.packets_received,
+            pct(p.loss_pct),
+            fmtMs(p.min_ms),
+            fmtMs(p.avg_ms),
+            fmtMs(p.max_ms),
+            fmtMs(p.jitter_ms),
+            p.quality,
+          ]]
+        ),
+      ].join("\n");
+    } catch (e) { pingText = "[ERRO] " + e; }
 
     try {
       const h = await invoke("trace_route", { host });
-      tracerouteText = "  " + h.length + " hops";
-    } catch (e) { tracerouteText = "  [ERRO] " + e; }
+      const replies = h.filter(x => x.address !== "*" && x.status !== "no_reply");
+      const noReply = h.length - replies.length;
+      tracerouteText = [
+        "Destino: " + host,
+        "Resumo: " + h.length + " hops, " + replies.length + " com resposta, " + noReply + " sem resposta",
+        plainTable(["Hop", "IP", "Hostname", "Min", "Media", "Max", "Perda", "Status"], h.map(x => [
+          x.hop_number,
+          x.address,
+          x.hostname || "-",
+          x.min_ms > 0 ? fmtMs(x.min_ms) : "-",
+          x.avg_ms > 0 ? fmtMs(x.avg_ms) : "-",
+          x.max_ms > 0 ? fmtMs(x.max_ms) : "-",
+          pct(x.loss_pct),
+          x.status,
+        ])),
+        noReply >= 3 ? "Observacao: varios hops sem resposta indicam filtragem de ICMP/UDP/TCP ou bloqueio no caminho, nao necessariamente queda de internet." : "",
+      ].filter(Boolean).join("\n");
+    } catch (e) { tracerouteText = "[ERRO] " + e; }
 
     try {
       const p = await invoke("get_listening_ports");
-      portsText = "  " + p.length + " portas em escuta";
-    } catch (e) { portsText = "  [ERRO] " + e; }
+      portsText = "Total: " + p.length + " portas em escuta\n" + plainTable(["Porta", "Protocolo", "Estado"], p.map(x => [x.port, x.protocol, x.state]));
+    } catch (e) { portsText = "[ERRO] " + e; }
 
     try {
       const r = await invoke("scan_ports", { host, portsList: portList, timeout_ms: 1500 });
       const open = r.filter(x => x.state === "open");
-      scanText = "  " + r.length + " escaneadas, " + open.length + " abertas";
-    } catch (e) { scanText = "  [ERRO] " + e; }
+      const filtered = r.filter(x => x.state === "filtered");
+      scanText = [
+        "Host: " + host,
+        "Resumo: " + r.length + " portas escaneadas, " + open.length + " abertas, " + filtered.length + " filtradas",
+        open.length ? plainTable(["Porta", "Servico", "Resposta"], open.map(x => [x.port, x.service, x.response_ms ? x.response_ms.toFixed(0) + " ms" : "-"])) : "Nenhuma porta aberta entre as portas comuns testadas.",
+      ].join("\n");
+    } catch (e) { scanText = "[ERRO] " + e; }
 
     try {
       const g = await invoke("get_gateway_info");
-      const gw = g.gateways?.[0];
-      gatewayText = "  " + (gw ? gw.ip + " (" + gw.interface + ")" : "N/A");
-    } catch (e) { gatewayText = "  [ERRO] " + e; }
+      gatewayText = [
+        g.warning ? "Aviso: " + g.warning : "Nenhum gateway duplo detectado.",
+        plainTable(["IP", "Interface", "Metrica", "Latencia", "Alcancavel", "Primario"], (g.gateways || []).map(x => [
+          x.ip, x.interface, x.metric, x.latency_ms !== null ? fmtMs(x.latency_ms) : "-", x.reachable ? "sim" : "nao", x.is_primary ? "sim" : "nao",
+        ])),
+      ].join("\n");
+    } catch (e) { gatewayText = "[ERRO] " + e; }
 
     try {
       const b = await invoke("benchmark_dns");
-      dnsBenchText = "  " + b.length + " servidores testados";
-    } catch (e) { dnsBenchText = "  [ERRO] " + e; }
+      dnsBenchText = plainTable(["Servidor", "IP", "Latencia", "Status", "Melhor"], b.map(x => [
+        x.name, x.ip, x.latency_ms ? x.latency_ms + " ms" : "-", x.status, x.best ? "sim" : "nao",
+      ]));
+    } catch (e) { dnsBenchText = "[ERRO] " + e; }
 
     try {
       const targets = await invoke("get_http_targets");
       const results = await invoke("test_http_timing", { urls: targets });
-      httpText = "  " + results.map(t => t.url + ": " + t.total_ms.toFixed(0) + "ms").join("\n  ");
-    } catch (e) { httpText = "  [ERRO] " + e; }
+      httpText = plainTable(["URL", "Status", "Connect", "TTFB", "Total", "Qualidade"], results.map(t => [
+        t.url, t.status_code, fmtMs(t.connect_ms), fmtMs(t.ttfb_ms), fmtMs(t.total_ms), t.quality,
+      ]));
+    } catch (e) { httpText = "[ERRO] " + e; }
 
     try {
       const s = await invoke("get_interface_stats");
-      ifaceStatsText = "  " + s.map(x => x.name + ": RX " + x.rx_mb.toFixed(1) + "MB, TX " + x.tx_mb.toFixed(1) + "MB").join("\n  ");
-    } catch (e) { ifaceStatsText = "  [ERRO] " + e; }
+      ifaceStatsText = plainTable(["Interface", "RX MB", "TX MB", "RX erros", "TX erros", "RX drop"], s.map(x => [
+        x.name, x.rx_mb.toFixed(1), x.tx_mb.toFixed(1), x.rx_errors, x.tx_errors, x.rx_dropped,
+      ]));
+    } catch (e) { ifaceStatsText = "[ERRO] " + e; }
 
     const report = await invoke("generate_report", {
       ipLocal: ipLocalText, ipPub: ipPubText, dns: dnsText, ping: pingText,
@@ -527,7 +643,7 @@ async function exportHtml() {
   if (!text.trim()) return;
   const date = new Date().toISOString().slice(0, 19).replace(/[T:-]/g, "");
   const html = `<!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="UTF-8"><title>King Analiser - Relatorio</title>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>KingNetworkTools - Relatorio</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:"Segoe UI",sans-serif;background:#1a1b26;color:#c0caf5;padding:40px;line-height:1.7}
@@ -537,10 +653,10 @@ pre{font-family:"JetBrains Mono",monospace;font-size:0.85rem;white-space:pre-wra
 hr{border:none;border-top:1px solid #3b4261;margin:16px 0}
 @media print{body{background:#fff;color:#000}pre{background:#f5f5f5;border-color:#ccc}}
 </style></head><body>
-<h1>King Analiser — Relatório de Diagnóstico</h1>
+<h1>KingNetworkTools — Relatório de Diagnóstico</h1>
 <div class="header">Gerado em ${new Date().toLocaleString("pt-BR")}</div><hr>
 <pre>${text.replace(/</g, "&lt;")}</pre><hr>
-<div class="header">King Analiser</div></body></html>`;
+<div class="header">KingNetworkTools</div></body></html>`;
   try {
     const path = await save({ defaultPath: "relatorio_rede_" + date + ".html", filters: [{ name: "HTML", extensions: ["html"] }] });
     if (!path) return;
@@ -556,15 +672,20 @@ function copyOutput() {
   navigator.clipboard.writeText(text).then(() => toast("Copiado!", "success"), () => toast("Erro ao copiar", "error"));
 }
 
-// ─── Continuous Ping ───
+// ─── Continuous Ping (Event-Streaming) ───
+let unlistenPing = null;
+
 async function doContinuousPing() {
   if (continuousPingRunning) return;
   const host = hostInput.value.trim() || "8.8.8.8";
   continuousPingRunning = true;
   pingData = [];
+  clearOutput("ping-output");
+  appendOutput("ping-output", "  Ping contínuo para " + host + " iniciado...\n");
   D("btn-continuous-ping").disabled = true;
   D("btn-stop-ping").disabled = false;
   graphSection.classList.remove("hidden");
+  graphStats.innerHTML = '<span style="color:var(--text-dim)">Aguardando primeiro ping...</span>';
 
   const canvas = latencyCanvas;
   const ctx = canvas.getContext("2d");
@@ -585,6 +706,8 @@ async function doContinuousPing() {
     ctx.fillText(mx.toFixed(0)+"ms", 2, 12); ctx.fillText(mn.toFixed(0)+"ms", 2, H-4);
   }
 
+  draw();
+
   function updateStats() {
     if (!pingData.length) return;
     const cur = pingData[pingData.length-1], mn = Math.min(...pingData), mx = Math.max(...pingData);
@@ -596,34 +719,48 @@ async function doContinuousPing() {
     draw();
   }
 
-  async function pingOnce() {
+  // Listen for ping events from Rust backend
+  unlistenPing = await listen("ping-event", (event) => {
     if (!continuousPingRunning) return;
-    try {
-      const r = await invoke("ping", { host, count: 1 });
-      if (r && r.packets_received > 0) {
-        const val = r.avg_ms || r.min_ms || 0;
-        if (val > 0) {
-          pingData.push(val);
-          if (pingData.length > MAX_PING_POINTS) pingData.shift();
-          updateStats();
-        }
-      }
-    } catch (e) {
-      console.error("Ping continuo erro:", e);
+    const data = event.payload;
+    const latency = data.latency_ms ?? data.latencyMs ?? 0;
+    const sequence = data.sequence ?? "?";
+    const done = data.done ?? false;
+
+    if (data.success && latency > 0) {
+      pingData.push(latency);
+      if (pingData.length > MAX_PING_POINTS) pingData.shift();
+      updateStats();
+      appendOutput("ping-output", "  #" + sequence + " resposta de " + host + ": " + latency.toFixed(1) + " ms");
+    } else {
+      appendOutput("ping-output", '  <span class="error">#' + sequence + " sem resposta</span>");
     }
-    if (continuousPingRunning) continuousPingTimer = setTimeout(pingOnce, 1000);
+
+    if (done) {
+      appendOutput("ping-output", "\n  Ping contínuo finalizado.");
+      stopContinuousPing();
+    }
+  });
+
+  // Start the continuous ping backend task
+  try {
+    await invoke("start_continuous_ping", { host, count: 30, intervalMs: 1000 });
+  } catch (e) {
+    console.error("Erro ao iniciar ping contínuo:", e);
+    toast("Erro ao iniciar ping contínuo: " + e, "error");
+    stopContinuousPing();
   }
-  if (pingData.length === 0) {
-    graphStats.innerHTML = '<span style="color:var(--text-dim)">Aguardando primeiro ping...</span>';
-  }
-  pingOnce();
 }
 
 function stopContinuousPing() {
+  const wasRunning = continuousPingRunning;
   continuousPingRunning = false;
   if (continuousPingTimer) { clearTimeout(continuousPingTimer); continuousPingTimer = null; }
+  if (unlistenPing) { unlistenPing(); unlistenPing = null; }
+  graphSection.classList.add("hidden");
   D("btn-continuous-ping").disabled = false;
   D("btn-stop-ping").disabled = true;
+  if (wasRunning) toast("Ping contínuo finalizado", "info");
 }
 
 // ─── Load port list ───
@@ -652,8 +789,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Tool buttons
   D("btn-ping").addEventListener("click", showPing);
   D("btn-traceroute").addEventListener("click", showTraceroute);
-  D("btn-mtr").addEventListener("click", () => { mtrHost.value = trHost.value; showMtr(); });
-  D("btn-mtr-run").addEventListener("click", showMtr);
+  D("btn-mtr").addEventListener("click", showMtr);
   D("btn-local-ip").addEventListener("click", showLocalIp);
   D("btn-public-ip").addEventListener("click", showPublicIp);
   D("btn-public-ip-info").addEventListener("click", showPublicIpInfo);
@@ -665,6 +801,10 @@ document.addEventListener("DOMContentLoaded", () => {
   D("btn-scan-network").addEventListener("click", showNetworkScan);
   D("btn-http").addEventListener("click", showHttpTiming);
   D("btn-report").addEventListener("click", showFullReport);
+  D("btn-dashboard-report").addEventListener("click", () => {
+    document.querySelector('.nav-item[data-view="report"]').click();
+    showFullReport();
+  });
 
   D("btn-export").addEventListener("click", exportReport);
   D("btn-export-html").addEventListener("click", exportHtml);

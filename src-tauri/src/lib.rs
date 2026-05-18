@@ -26,6 +26,7 @@ pub fn run() {
             commands::get_quality_thresholds,
             commands::scan_network,
             commands::generate_report,
+            commands::start_continuous_ping,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao iniciar o aplicativo Tauri");
