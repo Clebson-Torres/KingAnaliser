@@ -1,7 +1,120 @@
+# ======================
+# Dependências
+# ======================
 node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ======================
+# Build e distribuição
+# ======================
 dist/
+dist-ssr/
+*.local
 target/
 .vite/
+src-tauri/target/
+src-tauri/gen/
+build/
+release/
+*.exe
+*.msi
+*.deb
+*.rpm
+*.AppImage
+*.dmg
+*.zip
+*.tar.gz
+
+# ======================
+# Arquivos de log
+# ======================
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+vite.config.ts.timestamp-*
+
+# ======================
+# SO e editores
+# ======================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+.project
+.classpath
+.settings/
+
+# ======================
+# Arquivos temporários Rust
+# ======================
+*.rs.bk
+*.rlib
+*.prof*
+*.dwo
+*.gcno
+*.gcda
+*.dSYM
+perf.data*
+src-tauri/target/.rustc_info.json
+src-tauri/target/.lock
+src-tauri/target/rls/
+.cargo/
+
+# ======================
+# Testes e cobertura
+# ======================
+coverage/
+*.lcov
+*.gcov
+.nyc_output/
+tests/e2e/videos/
+tests/e2e/screenshots/
+
+# ======================
+# Ambiente e configurações locais
+# ======================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+*.crt
+secrets/
+.tauri/
+tauri.conf.local.json
+
+# ======================
+# Relatórios gerados pelo app
+# ======================
+reports/
+*.html
+*.txt
+!src-tauri/analyzer/*.rs  # Exceção: não ignora os arquivos fonte .rs
+!index.html  # Exceção: mantém o index.html fonte
+!style.css   # Exceção: mantém o CSS fonte
+
+# ======================
+# Backup e arquivos do sistema
+# ======================
+*.bak
+*.old
+*.orig
+*.tmp
+*.temp
+*.cache
+*.part
+*.download

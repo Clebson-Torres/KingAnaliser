@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Permissões padrão do Analisador de Rede","local":true,"windows":["main"],"permissions":["core:default","dialog:default","dialog:allow-save","fs:default","fs:allow-write-text-file"]}}
