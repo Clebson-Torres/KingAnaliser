@@ -74,7 +74,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'King Analiser ${{ github.ref_name }}'
+          releaseName: '[KingNetworkTools](https://github.com/Clebson-Torres/KingNetworkTools) ${{ github.ref_name }}'
           releaseBody: |
             ## King Analiser ${{ github.ref_name }}
 
@@ -107,6 +107,8 @@ jobs:
       - name: Dependências do sistema
         run: |
           dnf install -y \
+            gcc \
+            binutils \
             webkit2gtk4.1-devel \
             gtk3-devel \
             libappindicator-gtk3-devel \
@@ -155,7 +157,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'King Analiser ${{ github.ref_name }}'
+          releaseName: '[KingNetworkTools](https://github.com/Clebson-Torres/KingNetworkTools) ${{ github.ref_name }}'
           releaseBody: 'Build automático — ${{ github.ref_name }}'
           releaseDraft: false
           prerelease: false
@@ -216,7 +218,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'King Analiser ${{ github.ref_name }}'
+          releaseName: '[KingNetworkTools](https://github.com/Clebson-Torres/KingNetworkTools) ${{ github.ref_name }}'
           releaseBody: 'Build automático — ${{ github.ref_name }}'
           releaseDraft: false
           prerelease: false
