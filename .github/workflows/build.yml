@@ -1,4 +1,4 @@
-name: Build — King Analiser
+name: Build — KingAnaliser
 
 on:
   push:
@@ -10,76 +10,147 @@ permissions:
   contents: write
 
 jobs:
+
+  # ──────────────────────────────────────────
+  # Linux — AppImage (portátil) + .deb
+  # ──────────────────────────────────────────
   build-linux:
     runs-on: ubuntu-22.04
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install deps
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependências do sistema (WebKit + Tauri)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev pkg-config
-      
-      - uses: actions/setup-node@v4
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            pkg-config \
+            jq
+
+      - name: Node.js 20
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
-      
-      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      
-      - run: npm install
-      
-      - name: Build Tauri
+
+      # Extrai "1.2.3" da tag "v1.2.3"
+      - name: Extrair versão da tag
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Versão detectada: $VERSION"
+
+      # Atualiza version no tauri.conf.json e Cargo.toml
+      - name: Sincronizar versão nos configs
+        run: |
+          jq ".version = \"$VERSION\"" src-tauri/tauri.conf.json > /tmp/tauri.conf.json
+          mv /tmp/tauri.conf.json src-tauri/tauri.conf.json
+
+          sed -i "0,/^version = /s/^version = \"[^\"]*\"/version = \"$VERSION\"/" \
+            src-tauri/Cargo.toml
+
+          echo "tauri.conf.json → $(jq -r .version src-tauri/tauri.conf.json)"
+          echo "Cargo.toml      → $(grep '^version' src-tauri/Cargo.toml | head -1)"
+
+      - name: npm install
+        run: npm install
+
+      - name: Build (Tauri)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'King Analiser ${{ github.ref_name }}'
-          releaseBody: 'Build automático — ${{ github.ref_name }}'
+          releaseBody: |
+            ## King Analiser ${{ github.ref_name }}
+
+            ### 📦 Downloads
+
+            | Arquivo | Tipo | Plataforma |
+            |---|---|---|
+            | `*-setup.exe` | Instalador | Windows |
+            | `*_x64_en-US.msi` | Instalador MSI | Windows |
+            | `*-portable.exe` | **Portátil — sem instalação** | Windows |
+            | `*.AppImage` | **Portátil — sem instalação** | Linux |
+            | `*.deb` | Pacote Debian/Ubuntu | Linux |
           releaseDraft: false
           prerelease: false
-          args: --target x86_64-unknown-linux-gnu
-      
-      - name: Build portable
-        run: |
-          npm run tauri build -- --no-bundle --target x86_64-unknown-linux-gnu
-          mkdir -p portable
-          cp src-tauri/target/x86_64-unknown-linux-gnu/release/king-analiser portable/KingNetworkTools-Portable
-          chmod +x portable/KingNetworkTools-Portable
-          tar -czf portable/KingNetworkTools-Portable-Linux.tar.gz -C portable KingNetworkTools-Portable
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-portable
-          path: portable/KingNetworkTools-Portable-Linux.tar.gz
+          args: --target x86_64-unknown-linux-gnu --bundles appimage,deb
 
+  # ──────────────────────────────────────────
+  # Windows — Instaladores + .exe portátil
+  # ──────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js 20
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'          
-      
-      - uses: dtolnay/rust-toolchain@stable
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      
-      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      
-      - run: npm install
-      
-      - name: Build Tauri
+
+      # Extrai "1.2.3" da tag "v1.2.3"
+      - name: Extrair versão da tag
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Versão detectada: $VERSION"
+
+      # Atualiza version no tauri.conf.json e Cargo.toml
+      - name: Sincronizar versão nos configs
+        shell: bash
+        run: |
+          # tauri.conf.json — substitui o campo version via PowerShell (jq não está no Windows runner)
+          powershell -Command "
+            \$json = Get-Content 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+            \$json.version = '${{ env.VERSION }}'
+            \$json | ConvertTo-Json -Depth 10 | Set-Content 'src-tauri/tauri.conf.json'
+          "
+
+          # Cargo.toml — substitui apenas a primeira ocorrência de version = "..."
+          sed -i "0,/^version = /s/^version = \"[^\"]*\"/version = \"$VERSION\"/" \
+            src-tauri/Cargo.toml
+
+          echo "Cargo.toml → $(grep '^version' src-tauri/Cargo.toml | head -1)"
+
+      - name: npm install
+        run: npm install
+
+      - name: Build (Tauri)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -90,42 +161,17 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target x86_64-pc-windows-msvc
-      
-      - name: Build portable
-        shell: pwsh
-        run: |
-          npm run tauri build -- --no-bundle --target x86_64-pc-windows-msvc
-          New-Item -ItemType Directory -Force -Path portable | Out-Null
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\king-analiser.exe" "portable\KingNetworkTools-Portable.exe"
-          Compress-Archive -Path portable\* -DestinationPath portable\KingNetworkTools-Portable-Windows.zip
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-portable
-          path: portable/KingNetworkTools-Portable-Windows.zip
 
-  attach-portables:
-    needs: [build-linux, build-windows]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-portable
-          path: windows-portable
-      
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux-portable
-          path: linux-portable
-      
-      - uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            windows-portable/*.zip
-            linux-portable/*.tar.gz
-          append_body: true
+      # Sobe o .exe puro como portátil com o nome correto da versão
+      - name: Upload .exe portátil ao Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          EXE=$(find src-tauri/target/x86_64-pc-windows-msvc/release \
+            -maxdepth 1 -name "*.exe" | head -1)
+          if [ -f "$EXE" ]; then
+            PORTABLE="KingAnaliser_${{ env.VERSION }}_x64-portable.exe"
+            cp "$EXE" "$PORTABLE"
+            gh release upload ${{ github.ref_name }} "$PORTABLE" --clobber
+          fi

@@ -1,118 +1,45 @@
-# ======================
-# Dependências
-# ======================
+# ── Node ───────────────────────────────────
 node_modules/
-yarn.lock
-pnpm-lock.yaml
-
-# ======================
-# Build e distribuição
-# ======================
 dist/
 dist-ssr/
-*.local
-target/
 .vite/
+
+# ── Rust / Cargo ────────────────────────────
 src-tauri/target/
+Cargo.lock
+
+# ── Tauri ──────────────────────────────────
+src-tauri/WixTools/
 src-tauri/gen/
-build/
-release/
-*.exe
-*.msi
-*.deb
-*.rpm
-*.AppImage
-*.dmg
-*.zip
-*.tar.gz
 
-# ======================
-# Arquivos de log
-# ======================
+# ── Relatórios gerados pelo app ────────────
+netreport_*.txt
+relatorio_rede_*.txt
+*.report.txt
+
+# ── Ambiente e secrets ─────────────────────
+.env
+.env.local
+.env.production
+*.pem
+*.key
+
+# ── Logs ───────────────────────────────────
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-vite.config.ts.timestamp-*
+logs/
 
-# ======================
-# SO e editores
-# ======================
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+# ── Editores ───────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
 *.swp
 *.swo
 *~
-.idea/
-.vscode/
-*.sublime-*
-.project
-.classpath
-.settings/
+.DS_Store
+Thumbs.db
 
-# ======================
-# Arquivos temporários Rust
-# ======================
-*.rs.bk
-*.rlib
-*.prof*
-*.dwo
-*.gcno
-*.gcda
-*.dSYM
-perf.data*
-src-tauri/target/.rustc_info.json
-src-tauri/target/.lock
-src-tauri/target/rls/
-.cargo/
-
-# ======================
-# Testes e cobertura
-# ======================
-coverage/
-*.lcov
-*.gcov
-.nyc_output/
-tests/e2e/videos/
-tests/e2e/screenshots/
-
-# ======================
-# Ambiente e configurações locais
-# ======================
-.env
-.env.local
-.env.*.local
-*.pem
-*.key
-*.cert
-*.crt
-secrets/
-.tauri/
-tauri.conf.local.json
-
-# ======================
-# Relatórios gerados pelo app
-# ======================
-reports/
-*.txt
-!src-tauri/analyzer/*.rs  # Exceção: não ignora os arquivos fonte .rs
-!index.html  # Exceção: mantém o index.html fonte
-!style.css   # Exceção: mantém o CSS fonte
-
-# ======================
-# Backup e arquivos do sistema
-# ======================
-*.bak
-*.old
-*.orig
-*.tmp
-*.temp
-*.cache
-*.part
-*.download
+# ── OS ─────────────────────────────────────
+.DS_Store
+ehthumbs.db
+Desktop.ini
