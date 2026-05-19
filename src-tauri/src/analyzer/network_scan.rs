@@ -162,7 +162,7 @@ pub(crate) fn detect_subnet(subnet: Option<String>) -> Result<(String, u8), Stri
         return Err("Sub-rede inválida. Use o formato 192.168.1.0/24".to_string());
     }
 
-    let output = std::process::Command::new("ip")
+    let output = crate::process::command("ip")
         .args(["route", "show"])
         .output()
         .map_err(|e| format!("Falha ao executar ip route: {}", e))?;
@@ -183,7 +183,7 @@ pub(crate) fn detect_subnet(subnet: Option<String>) -> Result<(String, u8), Stri
 }
 
 fn get_gateway_ip_quiet() -> Option<String> {
-    let output = std::process::Command::new("ip")
+    let output = crate::process::command("ip")
         .args(["route", "show", "default"])
         .output()
         .ok()?;
@@ -214,11 +214,11 @@ fn check_host_up(ip: &str) -> bool {
 
     // Fallback: ping with quick timeout
     let output = if cfg!(target_os = "windows") {
-        std::process::Command::new("ping")
+        crate::process::command("ping")
             .args(["-n", "1", "-w", "500", ip])
             .output()
     } else {
-        std::process::Command::new("ping")
+        crate::process::command("ping")
             .args(["-c", "1", "-W", "1", ip])
             .output()
     };
@@ -232,7 +232,7 @@ fn check_host_up(ip: &str) -> bool {
 fn resolve_hostname(ip: &str) -> Option<String> {
     // Try reverse DNS via system command
     if cfg!(target_os = "windows") {
-        let output = std::process::Command::new("nslookup")
+        let output = crate::process::command("nslookup")
             .args([ip])
             .output()
             .ok()?;
@@ -248,10 +248,7 @@ fn resolve_hostname(ip: &str) -> Option<String> {
             }
         }
     } else {
-        let output = std::process::Command::new("host")
-            .args([ip])
-            .output()
-            .ok()?;
+        let output = crate::process::command("host").args([ip]).output().ok()?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             if let Some(pos) = line.find("domain name pointer") {
@@ -270,7 +267,7 @@ fn get_arp_table() -> HashMap<String, String> {
     let mut map = HashMap::new();
 
     if cfg!(target_os = "windows") {
-        if let Ok(output) = std::process::Command::new("arp").args(["-a"]).output() {
+        if let Ok(output) = crate::process::command("arp").args(["-a"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -323,11 +320,11 @@ fn identify_vendor(mac: &str, oui_map: &HashMap<&str, &str>) -> Option<String> {
 
 fn measure_latency(ip: &str) -> Option<f32> {
     let output = if cfg!(target_os = "windows") {
-        std::process::Command::new("ping")
+        crate::process::command("ping")
             .args(["-n", "1", "-w", "2000", ip])
             .output()
     } else {
-        std::process::Command::new("ping")
+        crate::process::command("ping")
             .args(["-c", "1", "-W", "2", ip])
             .output()
     };

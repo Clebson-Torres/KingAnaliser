@@ -87,7 +87,7 @@ pub fn get_listening_ports() -> Result<Vec<ListeningPort>, String> {
         ("ss", vec!["-tln4"])
     };
 
-    let output = std::process::Command::new(cmd)
+    let output = crate::process::command(cmd)
         .args(&args)
         .output()
         .map_err(|e| format!("Falha ao executar '{}': {}", cmd, e))?;

@@ -1,6 +1,6 @@
 [package]
 name = "kingnetworktools"
-version = "1.0.3"
+version = "1.0.4"
 description = "KingNetworkTools - analisador de rede completo com Tauri v2"
 authors = ["Clebson-Torres"]
 edition = "2021"

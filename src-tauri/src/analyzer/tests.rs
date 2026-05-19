@@ -3,8 +3,10 @@ mod tests {
     use crate::analyzer::iface_stats::parse_proc_net_dev;
     use crate::analyzer::mtr::parse_mtr_output;
     use crate::analyzer::network_scan::detect_subnet;
+    use crate::analyzer::report::generate_report;
     use crate::analyzer::route::{
-        classify_latency, parse_ping_output, parse_tracepath_output, ping_continuous_parse_line,
+        classify_latency, parse_ping_output, parse_tracepath_output, parse_tracert_output,
+        ping_continuous_parse_line,
     };
 
     #[test]
@@ -31,6 +33,25 @@ mod tests {
     fn test_parse_tracepath_empty() {
         let result = parse_tracepath_output("");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_windows_tracert() {
+        let output = "Tracing route to 8.8.8.8 over a maximum of 30 hops
+
+  1    <1 ms    <1 ms    <1 ms  192.168.1.1
+  2    10 ms    11 ms    12 ms  10.0.0.1
+  3     *        *        *     Request timed out.
+  4    20 ms    21 ms    22 ms  8.8.8.8";
+
+        let hops = parse_tracert_output(output).unwrap();
+        assert_eq!(hops.len(), 4);
+        assert_eq!(hops[0].address, "192.168.1.1");
+        assert!((hops[0].avg_ms - 0.5).abs() < 0.01);
+        assert_eq!(hops[1].address, "10.0.0.1");
+        assert!((hops[1].avg_ms - 11.0).abs() < 0.01);
+        assert_eq!(hops[2].status, "no_reply");
+        assert_eq!(hops[3].address, "8.8.8.8");
     }
 
     #[test]
@@ -79,6 +100,56 @@ mod tests {
         let result = parse_ping_output(output, 4).unwrap();
         assert_eq!(result.packets_received, 0);
         assert_eq!(result.loss_pct, 100.0);
+    }
+
+    #[test]
+    fn test_parse_windows_ping_ptbr() {
+        let output = "Disparando 8.8.8.8 com 32 bytes de dados:
+Resposta de 8.8.8.8: bytes=32 tempo=2ms TTL=118
+Resposta de 8.8.8.8: bytes=32 tempo=3ms TTL=118
+Resposta de 8.8.8.8: bytes=32 tempo<1ms TTL=118
+
+Estatisticas do Ping para 8.8.8.8:
+    Pacotes: Enviados = 3, Recebidos = 3, Perdidos = 0 (0% de perda),";
+
+        let result = parse_ping_output(output, 3).unwrap();
+        assert_eq!(result.host, "8.8.8.8");
+        assert_eq!(result.packets_sent, 3);
+        assert_eq!(result.packets_received, 3);
+        assert_eq!(result.loss_pct, 0.0);
+        assert!((result.min_ms - 0.5).abs() < 0.01);
+        assert!((result.avg_ms - 1.833).abs() < 0.01);
+        assert!((result.max_ms - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_report_summary_does_not_flag_zero_loss() {
+        let ping = "Host: 8.8.8.8
++----------+-----------+----------+-------+--------+--------+--------+--------+-----------+
+| Enviados | Recebidos | Perdidos | Perda | Min    | Media  | Max    | Jitter | Qualidade |
++----------+-----------+----------+-------+--------+--------+--------+--------+-----------+
+| 10       | 10        | 0        | 0.0%  | 1.0 ms | 2.0 ms | 3.0 ms | 1.0 ms | Excelente |
++----------+-----------+----------+-------+--------+--------+--------+--------+-----------+";
+
+        let report = generate_report(
+            "interfaces",
+            "ip publico",
+            "dns",
+            ping,
+            "Destino: 8.8.8.8\nResumo: 1 hops, 1 com resposta, 0 sem resposta",
+            "portas",
+            "scan",
+            "gateway",
+            "| Servidor | IP | Latencia | Status | Melhor |\n| Google DNS | 8.8.8.8 | 20 ms | OK | sim |",
+            "| URL | Status | Connect | TTFB | Total | Qualidade |\n| https://github.com | 200 | 10 ms | 20 ms | 30 ms | ok |",
+            "iface",
+            "inicio",
+            "fim",
+        );
+
+        assert!(report.contains("Qualidade geral: Excelente"));
+        assert!(report.contains("Diagnostico rapido: Nenhum problema detectado"));
+        assert!(!report.contains("Perda de pacotes detectada"));
     }
 
     #[test]

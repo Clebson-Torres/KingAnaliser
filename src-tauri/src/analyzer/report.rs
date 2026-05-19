@@ -12,6 +12,8 @@ pub fn generate_report(
     dns_bench: &str,
     http_timing: &str,
     iface_stats: &str,
+    started_at: &str,
+    ended_at: &str,
 ) -> String {
     let now = chrono::Local::now().format("%d/%m/%Y %H:%M:%S").to_string();
     let hostname = std::env::var("HOSTNAME")
@@ -23,22 +25,32 @@ pub fn generate_report(
     r.push_str("KINGNETWORKTOOLS - RELATORIO DE DIAGNOSTICO\n");
     r.push_str("============================================================\n");
     r.push_str(&format!("Data: {}\n", now));
+    r.push_str(&format!("Inicio da coleta: {}\n", started_at));
+    r.push_str(&format!("Fim da coleta: {}\n", ended_at));
     r.push_str(&format!("Host local: {}\n", hostname));
     r.push_str("============================================================\n\n");
 
     r.push_str("RESUMO EXECUTIVO\n");
     r.push_str("------------------------------------------------------------\n");
 
-    let general_quality = extract_general_quality(ping);
+    let ping_summary = extract_ping_summary(ping);
+    let dns_slow = has_latency_above(dns_bench, 100.0);
+    let http_slow = http_timing.contains("slow") || has_latency_above(http_timing, 250.0);
+    let general_quality = extract_general_quality(&ping_summary, dns_slow || http_slow);
     let worst_hop = extract_worst_hop(traceroute);
     let problem_text = if let Some(hop) = worst_hop {
         format!("Salto {} com latência elevada", hop)
-    } else if ping.contains("Perda")
-        || ping.contains("perda")
-        || ping.contains("loss")
-        || ping.contains("packet loss")
-    {
-        "Perda de pacotes detectada".to_string()
+    } else if ping_summary.loss_pct.unwrap_or(0.0) > 0.0 {
+        format!(
+            "Perda de pacotes detectada ({:.1}%)",
+            ping_summary.loss_pct.unwrap_or(0.0)
+        )
+    } else if dns_slow && http_slow {
+        "DNS/HTTP com latência elevada em alguns destinos".to_string()
+    } else if dns_slow {
+        "DNS com latência elevada".to_string()
+    } else if http_slow {
+        "HTTP com latência elevada em alguns destinos".to_string()
     } else {
         "Nenhum problema detectado".to_string()
     };
@@ -75,8 +87,32 @@ fn push_section(report: &mut String, title: &str, body: &str) {
     report.push_str("\n\n");
 }
 
-fn extract_general_quality(ping: &str) -> String {
-    let mut avg_ms = 999.0f32;
+#[derive(Default)]
+struct PingSummary {
+    avg_ms: Option<f32>,
+    loss_pct: Option<f32>,
+    quality: Option<String>,
+}
+
+fn extract_ping_summary(ping: &str) -> PingSummary {
+    let mut summary = PingSummary::default();
+
+    for line in ping.lines() {
+        let cells: Vec<&str> = line
+            .trim()
+            .trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim())
+            .collect();
+
+        if cells.len() >= 9 && cells[0].parse::<u32>().is_ok() {
+            summary.loss_pct = parse_percent(cells[3]);
+            summary.avg_ms = parse_ms(cells[5]);
+            summary.quality = Some(cells[8].to_string());
+            return summary;
+        }
+    }
+
     for line in ping.lines() {
         if line.contains("Médio")
             || line.contains("Média")
@@ -90,21 +126,45 @@ fn extract_general_quality(ping: &str) -> String {
                     .filter(|c| c.is_ascii_digit() || *c == '.')
                     .collect();
                 if let Ok(v) = cleaned.parse::<f32>() {
-                    avg_ms = v;
+                    summary.avg_ms = Some(v);
+                }
+            }
+        }
+
+        if line.contains('%')
+            && (line.contains("Perda") || line.contains("perda") || line.contains("loss"))
+        {
+            for part in line.split_whitespace() {
+                if let Some(loss) = parse_percent(part) {
+                    summary.loss_pct = Some(loss);
+                    break;
                 }
             }
         }
     }
-    if avg_ms == 999.0 {
-        for line in ping.lines() {
-            if line.contains("Perda") || line.contains("perda") || line.contains("loss") {
-                if line.contains("100%") {
-                    return "Ruim".to_string();
-                }
-            }
-        }
+
+    summary
+}
+
+fn extract_general_quality(ping: &PingSummary, has_secondary_latency: bool) -> String {
+    if ping.loss_pct.unwrap_or(0.0) >= 20.0 {
+        return "Ruim".to_string();
     }
-    quality::classify_latency(avg_ms).to_string()
+
+    if let Some(quality) = &ping.quality {
+        if has_secondary_latency && (quality == "Excelente" || quality == "Bom") {
+            return "Aceitável".to_string();
+        }
+        return quality.clone();
+    }
+
+    let avg_ms = ping.avg_ms.unwrap_or(999.0);
+    let quality = quality::classify_latency(avg_ms).to_string();
+    if has_secondary_latency && (quality == "Excelente" || quality == "Bom") {
+        "Aceitável".to_string()
+    } else {
+        quality
+    }
 }
 
 fn extract_worst_hop(traceroute: &str) -> Option<String> {
@@ -126,4 +186,33 @@ fn extract_worst_hop(traceroute: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn has_latency_above(text: &str, threshold_ms: f32) -> bool {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|pair| pair[1] == "ms" && parse_number(pair[0]).map_or(false, |ms| ms > threshold_ms))
+}
+
+fn parse_ms(text: &str) -> Option<f32> {
+    parse_number(text.trim_end_matches("ms").trim())
+}
+
+fn parse_percent(text: &str) -> Option<f32> {
+    parse_number(text.trim_end_matches('%').trim())
+}
+
+fn parse_number(text: &str) -> Option<f32> {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '.' || *c == ',')
+        .collect::<String>()
+        .replace(',', ".");
+
+    if cleaned.is_empty() {
+        None
+    } else {
+        cleaned.parse::<f32>().ok()
+    }
 }

@@ -18,12 +18,12 @@ pub fn run_mtr(host: &str, cycles: u8) -> Result<Vec<MtrHop>, String> {
         return run_mtr_windows(host, cycles);
     }
 
-    let mtr_check = std::process::Command::new("which").arg("mtr").output();
+    let mtr_check = crate::process::command("which").arg("mtr").output();
     let mtr_available = mtr_check.map(|o| o.status.success()).unwrap_or(false);
 
     if mtr_available {
         let cycles_str = cycles.to_string();
-        match std::process::Command::new("mtr")
+        match crate::process::command("mtr")
             .args(["--report", "--report-cycles", &cycles_str, "--no-dns", host])
             .output()
         {
@@ -123,125 +123,59 @@ pub(crate) fn parse_mtr_output(output: &str) -> Result<Vec<MtrHop>, String> {
 }
 
 fn run_mtr_windows(host: &str, cycles: u8) -> Result<Vec<MtrHop>, String> {
-    let mut hops = Vec::new();
-
-    let output = std::process::Command::new("tracert")
-        .args(["-h", "30", "-d", host])
-        .output()
-        .map_err(|e| format!("Falha ao executar tracert: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        let line = line.trim();
-        if line.is_empty() || !line.starts_with(' ') {
-            continue;
-        }
-        let line = line.trim();
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 2 {
-            continue;
-        }
-
-        let Ok(hop_num) = parts[0].parse::<u8>() else {
-            continue;
-        };
-        if hop_num > 30 {
-            break;
-        }
-
-        let addr = if parts[1] == "*" || parts.contains(&"Request") {
-            String::new()
-        } else {
-            parts[1].to_string()
-        };
-
-        if addr.is_empty() {
-            hops.push(MtrHop {
-                hop: hop_num,
-                host: "*".to_string(),
-                loss_pct: 100.0,
-                avg_ms: 0.0,
-                best_ms: 0.0,
-                worst_ms: 0.0,
-                jitter_ms: 0.0,
-                quality: "critical".to_string(),
-            });
-            continue;
-        }
-
-        let mut total_ms = 0.0f32;
-        let mut count = 0u8;
-        let mut best_ms = f32::MAX;
-        let mut worst_ms = 0.0f32;
-
-        for _ in 0..cycles {
-            let ping_output = std::process::Command::new("ping")
-                .args(["-n", "1", "-w", "3000", &addr])
-                .output();
-
-            if let Ok(out) = ping_output {
-                let ping_stdout = String::from_utf8_lossy(&out.stdout);
-                for pline in ping_stdout.lines() {
-                    if pline.contains("time=") || pline.contains("time<") {
-                        let ms_str = pline
-                            .split(['=', '<'])
-                            .nth(1)
-                            .and_then(|s| s.split_whitespace().next())
-                            .and_then(|s| s.trim_end_matches("ms").parse::<f32>().ok())
-                            .unwrap_or(0.0);
-                        if ms_str > 0.0 {
-                            total_ms += ms_str;
-                            count += 1;
-                            if ms_str < best_ms {
-                                best_ms = ms_str;
-                            }
-                            if ms_str > worst_ms {
-                                worst_ms = ms_str;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let avg_ms = if count > 0 {
-            total_ms / count as f32
-        } else {
-            0.0
-        };
-        if best_ms == f32::MAX {
-            best_ms = 0.0;
-        }
-        let jitter_ms = worst_ms - best_ms;
-        let loss_pct = if cycles > 0 {
-            ((cycles - count) as f32 / cycles as f32) * 100.0
-        } else {
-            0.0
-        };
-
-        let quality = if avg_ms < 30.0 && loss_pct == 0.0 {
-            "ok"
-        } else if avg_ms < 80.0 || loss_pct <= 2.0 {
-            "warning"
-        } else {
-            "critical"
-        };
-
-        hops.push(MtrHop {
-            hop: hop_num,
-            host: addr,
-            loss_pct,
-            avg_ms,
-            best_ms,
-            worst_ms,
-            jitter_ms,
-            quality: quality.to_string(),
-        });
-    }
-
+    let hops = route::trace_route(host)?;
     if hops.is_empty() {
-        Err("Nenhum hop encontrado no Windows MTR".to_string())
-    } else {
-        Ok(hops)
+        return Err("Nenhum hop encontrado no Windows MTR".to_string());
     }
+
+    Ok(hops
+        .into_iter()
+        .map(|hop| {
+            if hop.address == "*" || hop.status == "no_reply" {
+                return MtrHop {
+                    hop: hop.hop_number as u8,
+                    host: "*".to_string(),
+                    loss_pct: 100.0,
+                    avg_ms: 0.0,
+                    best_ms: 0.0,
+                    worst_ms: 0.0,
+                    jitter_ms: 0.0,
+                    quality: "critical".to_string(),
+                };
+            }
+
+            match route::ping_host(&hop.address, cycles.max(1)) {
+                Ok(ping) => MtrHop {
+                    hop: hop.hop_number as u8,
+                    host: hop.address,
+                    loss_pct: ping.loss_pct,
+                    avg_ms: ping.avg_ms,
+                    best_ms: ping.min_ms,
+                    worst_ms: ping.max_ms,
+                    jitter_ms: ping.jitter_ms,
+                    quality: if ping.quality_color == "red" {
+                        "critical".to_string()
+                    } else if ping.quality_color == "yellow" {
+                        "warning".to_string()
+                    } else {
+                        "ok".to_string()
+                    },
+                },
+                Err(_) => MtrHop {
+                    hop: hop.hop_number as u8,
+                    host: hop.address,
+                    loss_pct: hop.loss_pct,
+                    avg_ms: hop.avg_ms,
+                    best_ms: hop.min_ms,
+                    worst_ms: hop.max_ms,
+                    jitter_ms: if hop.max_ms > hop.min_ms {
+                        hop.max_ms - hop.min_ms
+                    } else {
+                        0.0
+                    },
+                    quality: hop.status,
+                },
+            }
+        })
+        .collect())
 }

@@ -1,5 +1,6 @@
 mod analyzer;
 mod commands;
+mod process;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

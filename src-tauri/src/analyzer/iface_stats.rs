@@ -67,9 +67,10 @@ pub(crate) fn parse_proc_net_dev(content: &str) -> Result<Vec<IfaceStats>, Strin
 }
 
 fn get_stats_windows() -> Result<Vec<IfaceStats>, String> {
-    let output = std::process::Command::new("powershell")
+    let output = crate::process::command("powershell")
         .args([
             "-NoProfile",
+            "-NonInteractive",
             "-Command",
             "Get-NetAdapterStatistics | Select-Object Name, ReceivedBytes, SentBytes, ReceivedUnicastPackets, SentUnicastPackets | ConvertTo-Json",
         ])

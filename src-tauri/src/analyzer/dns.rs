@@ -44,15 +44,12 @@ pub fn dns_lookup(host: &str) -> Result<DnsResult, String> {
 
 fn reverse_dns(ip: &str) -> Option<String> {
     let output = if cfg!(target_os = "windows") {
-        std::process::Command::new("nslookup")
+        crate::process::command("nslookup")
             .args([ip])
             .output()
             .ok()?
     } else {
-        std::process::Command::new("host")
-            .args([ip])
-            .output()
-            .ok()?
+        crate::process::command("host").args([ip]).output().ok()?
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);

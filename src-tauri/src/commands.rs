@@ -67,11 +67,11 @@ pub async fn start_continuous_ping(
         while remaining > 0 {
             let start = std::time::Instant::now();
             let cmd = if cfg!(target_os = "windows") {
-                std::process::Command::new("ping")
+                crate::process::command("ping")
                     .args(["-n", "1", "-w", "3000", &host_clone])
                     .output()
             } else {
-                std::process::Command::new("ping")
+                crate::process::command("ping")
                     .args(["-c", "1", "-W", "3", &host_clone])
                     .output()
             };
@@ -239,6 +239,8 @@ pub async fn generate_report(
     dns_bench: String,
     http_timing: String,
     iface_stats: String,
+    started_at: String,
+    ended_at: String,
 ) -> String {
     report::generate_report(
         &ip_local,
@@ -252,5 +254,7 @@ pub async fn generate_report(
         &dns_bench,
         &http_timing,
         &iface_stats,
+        &started_at,
+        &ended_at,
     )
 }

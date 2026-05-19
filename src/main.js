@@ -173,7 +173,18 @@ async function loadDashboard() {
     }
 
     D("card-public-ip").querySelector(".card-value").textContent = ipPub;
+    D("card-public-ip").querySelector(".card-sub").textContent = "Geo: consultando...";
     setStatusCard("status-internet", ipPub === "---" ? "bad" : "good", ipPub === "---" ? "Sem IP público" : "Online");
+
+    try {
+      const geo = await invoke("get_public_ip_info");
+      D("card-public-ip").querySelector(".card-value").textContent = geo.ipv4 || ipPub;
+      const location = [geo.city, geo.region, geo.country_code || geo.country].filter(Boolean).join(" / ");
+      const provider = geo.isp || geo.org || "";
+      D("card-public-ip").querySelector(".card-sub").textContent = location || provider || "Geo: indisponível";
+    } catch {
+      D("card-public-ip").querySelector(".card-sub").textContent = "Geo: indisponível";
+    }
 
     try {
       const info = await invoke("get_gateway_info");
@@ -451,6 +462,7 @@ async function showHttpTiming() {
 // ─── Report ───
 async function showFullReport() {
   await withLoading("Relatório...", "report", "report-output", async () => {
+    const reportStartedAt = new Date();
     clearOutput("report-output");
     const host = hostInput.value.trim() || "8.8.8.8";
     appendOutput("report-output", "  Coletando dados...\n");
@@ -581,11 +593,14 @@ async function showFullReport() {
       ]));
     } catch (e) { ifaceStatsText = "[ERRO] " + e; }
 
+    const reportEndedAt = new Date();
     const report = await invoke("generate_report", {
       ipLocal: ipLocalText, ipPub: ipPubText, dns: dnsText, ping: pingText,
       traceroute: tracerouteText, portsStr: portsText, scan: scanText,
       gateway: gatewayText, dnsBench: dnsBenchText, httpTiming: httpText,
       ifaceStats: ifaceStatsText,
+      startedAt: reportStartedAt.toLocaleString("pt-BR"),
+      endedAt: reportEndedAt.toLocaleString("pt-BR"),
     });
 
     D("report-output").textContent = report;

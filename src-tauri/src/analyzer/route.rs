@@ -40,7 +40,7 @@ pub fn ping_host(host: &str, count: u8) -> Result<PingResult, String> {
         ("ping", vec!["-c", &count_str, "-i", "0.2", host])
     };
 
-    let output = std::process::Command::new(cmd)
+    let output = crate::process::command(cmd)
         .args(&args)
         .output()
         .map_err(|e| format!("Falha ao executar ping: {}", e))?;
@@ -72,12 +72,22 @@ pub fn ping_host(host: &str, count: u8) -> Result<PingResult, String> {
 pub fn parse_ping_output(output: &str, count: u8) -> Result<PingResult, String> {
     let host = extract_host(output);
 
-    if cfg!(target_os = "windows") {
+    let looks_like_windows = output.contains("Enviados")
+        || output.contains("Recebidos")
+        || output.contains("Sent =")
+        || output.contains("Received =")
+        || output.contains("Minimum =")
+        || output.contains("Mínimo")
+        || output.contains("Minimo");
+
+    if looks_like_windows {
         return parse_ping_output_windows(output, count, host);
     }
 
-    let re_loss =
-        Regex::new(r"(\d+)\s+packets transmitted,\s+(\d+)\s+(received|packets received)").unwrap();
+    let re_loss = Regex::new(
+        r"(?i)(\d+)\s+(packets transmitted|pacotes transmitidos),\s+(\d+)\s+(received|packets received|recebidos)",
+    )
+    .unwrap();
     let re_rtt =
         Regex::new(r"rtt min/avg/max/mdev\s*=\s*([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)").unwrap();
 
@@ -92,7 +102,7 @@ pub fn parse_ping_output(output: &str, count: u8) -> Result<PingResult, String> 
     for line in output.lines() {
         if let Some(caps) = re_loss.captures(line) {
             transmitted = caps[1].parse().unwrap_or(count as u32) as u8;
-            received = caps[2].parse().unwrap_or(0);
+            received = caps[3].parse().unwrap_or(0);
             loss_pct = if transmitted > 0 {
                 ((transmitted - received) as f32 / transmitted as f32) * 100.0
             } else {
@@ -136,18 +146,22 @@ fn parse_ping_output_windows(output: &str, count: u8, host: String) -> Result<Pi
     let re_loss_en =
         Regex::new(r"Sent\s*=\s*(\d+),\s*Received\s*=\s*(\d+),\s*Lost\s*=\s*\d+\s*\((\d+)%")
             .unwrap();
-    let re_rtt =
-        Regex::new(r"M[íi]nimo\s*=\s*(\d+).*?M[áa]ximo\s*=\s*(\d+).*?M[ée]dia\s*=\s*(\d+)")
-            .unwrap();
+    let re_rtt = Regex::new(r"(?i)(m.nimo|minimum)\s*=\s*(\d+).*?(m.ximo|maximum)\s*=\s*(\d+).*?(m.dia|average)\s*=\s*(\d+)").unwrap();
     let re_rtt_en =
         Regex::new(r"Minimum\s*=\s*(\d+).*?Maximum\s*=\s*(\d+).*?Average\s*=\s*(\d+)").unwrap();
 
+    let host = if host.is_empty() {
+        extract_windows_host(output)
+    } else {
+        host
+    };
     let mut transmitted: u8 = count;
     let mut received: u8 = 0;
     let mut loss_pct: f32 = 0.0;
     let mut min_ms: f32 = 0.0;
     let mut avg_ms: f32 = 0.0;
     let mut max_ms: f32 = 0.0;
+    let mut samples = Vec::new();
 
     for line in output.lines() {
         if let Some(caps) = re_loss.captures(line) {
@@ -161,14 +175,37 @@ fn parse_ping_output_windows(output: &str, count: u8, host: String) -> Result<Pi
         }
 
         if let Some(caps) = re_rtt.captures(line) {
-            min_ms = caps[1].parse().unwrap_or(0.0);
-            max_ms = caps[2].parse().unwrap_or(0.0);
-            avg_ms = caps[3].parse().unwrap_or(0.0);
+            min_ms = caps[2].parse().unwrap_or(0.0);
+            max_ms = caps[4].parse().unwrap_or(0.0);
+            avg_ms = caps[6].parse().unwrap_or(0.0);
         } else if let Some(caps) = re_rtt_en.captures(line) {
             min_ms = caps[1].parse().unwrap_or(0.0);
             max_ms = caps[2].parse().unwrap_or(0.0);
             avg_ms = caps[3].parse().unwrap_or(0.0);
         }
+
+        if let Some(ms) = ping_continuous_parse_line(line) {
+            samples.push(ms);
+        }
+    }
+
+    if avg_ms == 0.0 && !samples.is_empty() {
+        min_ms = samples.iter().copied().fold(f32::MAX, f32::min);
+        max_ms = samples.iter().copied().fold(0.0, f32::max);
+        avg_ms = samples.iter().sum::<f32>() / samples.len() as f32;
+        if min_ms == f32::MAX {
+            min_ms = 0.0;
+        }
+    }
+
+    if received == 0 && !samples.is_empty() {
+        received = samples.len().min(u8::MAX as usize) as u8;
+        transmitted = transmitted.max(received);
+        loss_pct = if transmitted > 0 {
+            ((transmitted - received) as f32 / transmitted as f32) * 100.0
+        } else {
+            0.0
+        };
     }
 
     let jitter_ms = if max_ms > min_ms {
@@ -191,6 +228,37 @@ fn parse_ping_output_windows(output: &str, count: u8, host: String) -> Result<Pi
         quality: quality.to_string(),
         quality_color: quality_color.to_string(),
     })
+}
+
+fn extract_windows_host(output: &str) -> String {
+    for line in output.lines() {
+        let line = line.trim();
+        for prefix in ["Disparando ", "Pinging "] {
+            if let Some(rest) = line.strip_prefix(prefix) {
+                return rest
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(['[', ']'])
+                    .to_string();
+            }
+        }
+
+        for marker in ["Ping statistics for ", "Estat"] {
+            if let Some(pos) = line.find(marker) {
+                let rest = if marker == "Estat" {
+                    line.split(" para ").nth(1).unwrap_or("")
+                } else {
+                    &line[pos + marker.len()..]
+                };
+                let host = rest.trim().trim_end_matches(':').trim_matches(['[', ']']);
+                if !host.is_empty() {
+                    return host.to_string();
+                }
+            }
+        }
+    }
+    String::new()
 }
 
 fn classify_quality(avg_ms: f32, loss_pct: f32, jitter_ms: f32) -> (&'static str, &'static str) {
@@ -224,7 +292,7 @@ pub fn trace_route(host: &str) -> Result<Vec<Hop>, String> {
         return trace_route_tracert(host);
     }
 
-    let has_traceroute = std::process::Command::new("which")
+    let has_traceroute = crate::process::command("which")
         .arg("traceroute")
         .output()
         .map(|o| o.status.success())
@@ -254,10 +322,7 @@ pub fn trace_route(host: &str) -> Result<Vec<Hop>, String> {
         ];
 
         for args in candidates {
-            match std::process::Command::new("traceroute")
-                .args(&args)
-                .output()
-            {
+            match crate::process::command("traceroute").args(&args).output() {
                 Ok(output) => {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -473,7 +538,7 @@ fn reverse_dns_std(ip: &std::net::IpAddr) -> Option<String> {
     // Try reverse DNS via system command
     let ip_str = ip.to_string();
     if cfg!(target_os = "windows") {
-        let output = std::process::Command::new("nslookup")
+        let output = crate::process::command("nslookup")
             .args([&ip_str])
             .output()
             .ok()?;
@@ -489,7 +554,7 @@ fn reverse_dns_std(ip: &std::net::IpAddr) -> Option<String> {
             }
         }
     } else {
-        let output = std::process::Command::new("host")
+        let output = crate::process::command("host")
             .args([&ip_str])
             .output()
             .ok()?;
@@ -522,8 +587,8 @@ fn classify_hop_status(avg_ms: f32, loss_pct: f32, has_reply: bool) -> String {
 
 fn trace_route_tracert(host: &str) -> Result<Vec<Hop>, String> {
     let max_hops_str = MAX_HOPS.to_string();
-    let output = std::process::Command::new("tracert")
-        .args(["-h", &max_hops_str, "-d", host])
+    let output = crate::process::command("tracert")
+        .args(["-h", &max_hops_str, "-w", "3000", "-d", host])
         .output()
         .map_err(|e| format!("Falha ao executar tracert: {}", e))?;
 
@@ -531,9 +596,8 @@ fn trace_route_tracert(host: &str) -> Result<Vec<Hop>, String> {
     parse_tracert_output(&stdout)
 }
 
-fn parse_tracert_output(output: &str) -> Result<Vec<Hop>, String> {
+pub(crate) fn parse_tracert_output(output: &str) -> Result<Vec<Hop>, String> {
     let mut hops = Vec::new();
-    let _re = Regex::new(r"^\s*(\d+)\s+(.*?)(\d+\.?\d*\s*ms|\*)\s*.*$").unwrap();
     let re_line = Regex::new(r"^\s*(\d+)").unwrap();
 
     for line in output.lines() {
@@ -564,24 +628,45 @@ fn parse_tracert_output(output: &str) -> Result<Vec<Hop>, String> {
             continue;
         }
 
-        let mut rtts: Vec<f32> = parts[1..]
-            .iter()
-            .filter_map(|s| {
-                let s = s.trim_end_matches("ms");
-                if s == "<1" || s == "<" {
-                    Some(0.5f32)
-                } else {
-                    s.parse::<f32>().ok()
-                }
-            })
-            .collect();
+        let mut rtts = Vec::new();
+        let mut i = 1;
+        while i < parts.len() {
+            let token = parts[i].trim();
+            let next = parts.get(i + 1).map(|s| s.trim());
 
-        let addr_idx = rtts.len() + 1;
-        let addr = if addr_idx < parts.len() {
-            parts[addr_idx].to_string()
-        } else {
-            parts.last().unwrap_or(&"*").to_string()
-        };
+            if token == "<1" && next == Some("ms") {
+                rtts.push(0.5);
+                i += 2;
+                continue;
+            }
+
+            if let Some(raw) = token.strip_suffix("ms") {
+                if raw == "<1" {
+                    rtts.push(0.5);
+                } else if let Ok(ms) = raw.parse::<f32>() {
+                    rtts.push(ms);
+                }
+                i += 1;
+                continue;
+            }
+
+            if next == Some("ms") {
+                if let Ok(ms) = token.parse::<f32>() {
+                    rtts.push(ms);
+                    i += 2;
+                    continue;
+                }
+            }
+
+            i += 1;
+        }
+
+        let addr = parts
+            .iter()
+            .rev()
+            .find(|part| is_tracert_address_token(part))
+            .map(|part| part.trim_matches(['[', ']']).to_string())
+            .unwrap_or_else(|| "*".to_string());
 
         if rtts.is_empty() {
             rtts.push(0.0);
@@ -615,8 +700,23 @@ fn parse_tracert_output(output: &str) -> Result<Vec<Hop>, String> {
     }
 }
 
+fn is_tracert_address_token(token: &str) -> bool {
+    let token = token.trim_matches(['[', ']']);
+    if token.is_empty()
+        || token == "*"
+        || token == "<1"
+        || token.eq_ignore_ascii_case("ms")
+        || token.ends_with("ms")
+        || token.parse::<f32>().is_ok()
+    {
+        return false;
+    }
+
+    token.parse::<std::net::IpAddr>().is_ok() || token.contains('.')
+}
+
 fn trace_route_tracepath(host: &str) -> Result<Vec<Hop>, String> {
-    let output = std::process::Command::new("tracepath")
+    let output = crate::process::command("tracepath")
         .args(["-n", host])
         .output()
         .map_err(|e| format!("Falha ao executar tracepath: {}", e))?;

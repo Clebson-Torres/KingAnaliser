@@ -31,7 +31,7 @@ pub fn get_network_interfaces() -> Result<Vec<InterfaceInfo>, String> {
         return get_interfaces_windows();
     }
 
-    let output = std::process::Command::new("ip")
+    let output = crate::process::command("ip")
         .args(["-j", "addr", "show"])
         .output();
 
@@ -41,7 +41,7 @@ pub fn get_network_interfaces() -> Result<Vec<InterfaceInfo>, String> {
             parse_ip_json(&stdout)
         }
         _ => {
-            let output = std::process::Command::new("ip")
+            let output = crate::process::command("ip")
                 .args(["addr", "show"])
                 .output()
                 .map_err(|e| format!("Falha ao executar ip addr: {}", e))?;
@@ -150,9 +150,10 @@ fn parse_ip_text(output: &str) -> Result<Vec<InterfaceInfo>, String> {
 }
 
 fn get_interfaces_windows() -> Result<Vec<InterfaceInfo>, String> {
-    let output = std::process::Command::new("powershell")
+    let output = crate::process::command("powershell")
         .args([
             "-NoProfile",
+            "-NonInteractive",
             "-Command",
             "Get-NetAdapter | Select-Object Name, InterfaceDescription, MacAddress, Status | ConvertTo-Json",
         ])
@@ -184,9 +185,10 @@ fn get_interfaces_windows() -> Result<Vec<InterfaceInfo>, String> {
 }
 
 fn get_windows_ip(iface_name: &str) -> Option<String> {
-    let output = std::process::Command::new("powershell")
+    let output = crate::process::command("powershell")
         .args([
             "-NoProfile",
+            "-NonInteractive",
             "-Command",
             &format!(
                 "Get-NetIPAddress -InterfaceAlias '{}' -AddressFamily IPv4 | Select-Object -ExpandProperty IPAddress",

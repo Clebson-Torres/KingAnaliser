@@ -75,7 +75,7 @@ fn get_all_gateways() -> Result<Vec<(String, String, u32)>, String> {
         return get_gateways_windows();
     }
 
-    let output = std::process::Command::new("ip")
+    let output = crate::process::command("ip")
         .args(["route", "show"])
         .output()
         .map_err(|e| format!("Falha ao executar ip route: {}", e))?;
@@ -109,7 +109,7 @@ fn get_all_gateways() -> Result<Vec<(String, String, u32)>, String> {
 }
 
 fn get_gateways_windows() -> Result<Vec<(String, String, u32)>, String> {
-    let output = std::process::Command::new("netstat")
+    let output = crate::process::command("netstat")
         .args(["-rn"])
         .output()
         .map_err(|e| format!("Falha ao executar netstat: {}", e))?;

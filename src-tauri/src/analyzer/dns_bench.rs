@@ -45,7 +45,7 @@ pub fn benchmark_dns() -> Vec<DnsServer> {
 }
 
 fn is_tool_available(name: &str) -> bool {
-    std::process::Command::new("which")
+    crate::process::command("which")
         .arg(name)
         .output()
         .map(|o| o.status.success())
@@ -57,7 +57,7 @@ fn benchmark_dns_dig(ip: &str) -> Option<(u32, String)> {
         return None;
     }
     let dig_arg = format!("@{}", ip);
-    let output = std::process::Command::new("dig")
+    let output = crate::process::command("dig")
         .args([&dig_arg, "google.com", "+stats"])
         .output()
         .ok()?;
@@ -84,7 +84,7 @@ fn benchmark_dns_resolvectl(_ip: &str) -> Option<(u32, String)> {
         return None;
     }
     let start = std::time::Instant::now();
-    let output = std::process::Command::new("resolvectl")
+    let output = crate::process::command("resolvectl")
         .args(["query", "google.com"])
         .output()
         .ok()?;
@@ -102,7 +102,7 @@ fn benchmark_dns_getent(_ip: &str) -> Option<(u32, String)> {
     }
     // getent doesn't support custom DNS servers, so we time it as a reference
     let start = std::time::Instant::now();
-    let output = std::process::Command::new("getent")
+    let output = crate::process::command("getent")
         .args(["hosts", "google.com"])
         .output()
         .ok()?;
@@ -139,7 +139,7 @@ fn benchmark_dns_linux(ip: &str) -> (u32, String) {
 }
 
 fn benchmark_dns_nslookup(ip: &str) -> (u32, String) {
-    let output = std::process::Command::new("nslookup")
+    let output = crate::process::command("nslookup")
         .args(["google.com", ip])
         .output();
 
@@ -212,8 +212,8 @@ fn benchmark_dns_windows(ip: &str) -> (u32, String) {
         ip
     );
 
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", &script])
+    let output = crate::process::command("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .output();
 
     match output {
