@@ -1,6 +1,6 @@
 use crate::analyzer::{
     dns, dns_bench, gateway, http_timing, iface_stats, ip, mtr, network_scan, ports, quality,
-    report, route,
+    report, route, speedtest,
 };
 use tauri::Emitter;
 
@@ -28,6 +28,13 @@ pub async fn get_public_ip() -> Result<String, String> {
 #[tauri::command]
 pub async fn get_public_ip_info() -> Result<ip::IpInfo, String> {
     tokio::task::spawn_blocking(ip::get_public_ip_info)
+        .await
+        .map_err(|e| format!("Erro interno: {}", e))?
+}
+
+#[tauri::command]
+pub async fn run_speedtest(app_handle: tauri::AppHandle) -> Result<speedtest::SpeedTestResult, String> {
+    tokio::task::spawn_blocking(move || speedtest::run_speedtest(Some(app_handle)))
         .await
         .map_err(|e| format!("Erro interno: {}", e))?
 }

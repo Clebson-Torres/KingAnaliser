@@ -10,4 +10,5 @@ pub mod ports;
 pub mod quality;
 pub mod report;
 pub mod route;
+pub mod speedtest;
 pub mod tests;

@@ -46,6 +46,10 @@
             <span class="nav-icon">&#x2197;</span>
             <span>HTTP Timing</span>
           </button>
+          <button class="nav-item" data-view="speedtest">
+            <span class="nav-icon">&#x26A1;</span>
+            <span>Speed Test</span>
+          </button>
           <button class="nav-item" data-view="report">
             <span class="nav-icon">&#x2637;</span>
             <span>Relatórios</span>
@@ -220,6 +224,49 @@
               <button id="btn-http" class="btn btn-gold">Testar HTTP Timing</button>
             </div>
             <div id="http-output" class="tool-output"></div>
+          </div>
+
+          <div id="view-speedtest" class="view">
+            <div class="tool-header">
+              <div class="input-row">
+                <button id="btn-speedtest" class="btn btn-gold">Iniciar Speed Test</button>
+                <span id="speedtest-status" style="margin-left:12px;color:var(--text-dim)"></span>
+              </div>
+            </div>
+            <div id="speedtest-progress-bar" class="progress-bar hidden">
+              <div id="speedtest-progress-fill" class="progress-fill" style="width:0%"></div>
+            </div>
+            <div id="speedtest-phase" class="speedtest-phase"></div>
+            <div id="speedtest-results" class="speedtest-results hidden">
+              <div class="speedtest-grid">
+                <div class="speedtest-card">
+                  <div class="st-label">Download</div>
+                  <div class="st-value" id="st-download">--</div>
+                  <div class="st-unit">Mbps</div>
+                </div>
+                <div class="speedtest-card">
+                  <div class="st-label">Upload</div>
+                  <div class="st-value" id="st-upload">--</div>
+                  <div class="st-unit">Mbps</div>
+                </div>
+                <div class="speedtest-card">
+                  <div class="st-label">Latência</div>
+                  <div class="st-value" id="st-latency">--</div>
+                  <div class="st-unit">ms</div>
+                </div>
+                <div class="speedtest-card">
+                  <div class="st-label">Jitter</div>
+                  <div class="st-value" id="st-jitter">--</div>
+                  <div class="st-unit">ms</div>
+                </div>
+              </div>
+              <div id="speedtest-quality" class="speedtest-quality"></div>
+              <div id="speedtest-server" style="text-align:center;color:var(--text-dim);margin-top:8px;font-size:0.85rem"></div>
+            </div>
+            <div id="speedtest-current" class="speedtest-current hidden">
+              <span id="st-current-label">Velocidade atual:</span>
+              <span id="st-current-value">0.0 Mbps</span>
+            </div>
           </div>
 
           <div id="view-report" class="view">

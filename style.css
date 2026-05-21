@@ -577,6 +577,60 @@ body {
   accent-color: var(--gold);
 }
 
+/* ─── Speed Test ─── */
+.speedtest-phase {
+  text-align: center;
+  padding: 12px;
+  color: var(--gold);
+  font-weight: 600;
+  font-size: 1rem;
+}
+.speedtest-current {
+  text-align: center;
+  padding: 8px;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+.speedtest-current.hidden { display: none; }
+.speedtest-results { margin-top: 16px; }
+.speedtest-results.hidden { display: none; }
+.speedtest-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.speedtest-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+}
+.speedtest-card .st-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.speedtest-card .st-value {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 4px 0;
+  color: var(--fg);
+}
+.speedtest-card .st-unit {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.speedtest-quality {
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  padding: 8px;
+  border-radius: var(--radius);
+}
+
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

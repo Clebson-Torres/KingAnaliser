@@ -461,6 +461,80 @@ async function showHttpTiming() {
   });
 }
 
+// ─── Speed Test ───
+let speedtestRunning = false;
+let unlistenSpeedtest = null;
+
+async function showSpeedTest() {
+  if (speedtestRunning) return;
+  switchView("speedtest");
+  speedtestRunning = true;
+  const btn = D("btn-speedtest");
+  const status = D("speedtest-status");
+  const phase = D("speedtest-phase");
+  const progressBar = D("speedtest-progress-bar");
+  const progressFill = D("speedtest-progress-fill");
+  const results = D("speedtest-results");
+  const current = D("speedtest-current");
+
+  btn.disabled = true;
+  status.textContent = "Em andamento...";
+  results.classList.add("hidden");
+  current.classList.remove("hidden");
+  progressBar.classList.remove("hidden");
+  progressFill.style.width = "0%";
+  D("st-current-value").textContent = "0.0 Mbps";
+  D("st-current-label").textContent = "Preparando...";
+
+  // Listen for progress events
+  unlistenSpeedtest = await listen("speedtest-event", (event) => {
+    const data = event.payload;
+    phase.textContent = {
+      latency: "📡 Medindo latência...",
+      download: "⬇ Testando download...",
+      upload: "⬆ Testando upload...",
+    }[data.phase] || data.phase;
+
+    progressFill.style.width = data.progress_pct + "%";
+    if (data.current_mbps > 0) {
+      D("st-current-value").textContent = data.current_mbps.toFixed(1) + " Mbps";
+      D("st-current-label").textContent = data.phase === "download" ? "⬇ Download:" : "⬆ Upload:";
+    }
+  });
+
+  try {
+    const result = await invoke("run_speedtest");
+    progressFill.style.width = "100%";
+    phase.textContent = "✅ Teste concluído!";
+    current.classList.add("hidden");
+    results.classList.remove("hidden");
+
+    D("st-download").textContent = result.download_mbps.toFixed(1);
+    D("st-upload").textContent = result.upload_mbps.toFixed(1);
+    D("st-latency").textContent = result.latency_ms.toFixed(0);
+    D("st-jitter").textContent = result.jitter_ms.toFixed(1);
+
+    const qualityEl = D("speedtest-quality");
+    const colorMap = { green: "#9ece6a", yellow: "#e0af68", red: "#f7768e" };
+    const color = colorMap[result.quality_color] || "#565f89";
+    qualityEl.textContent = result.quality;
+    qualityEl.style.cssText = "color:" + color + ";border:1px solid " + color + ";";
+    qualityEl.style.background = color + "18";
+
+    D("speedtest-server").textContent = "Servidor: " + result.server + (result.isp ? " | ISP: " + result.isp : "");
+    status.textContent = "";
+  } catch (e) {
+    phase.textContent = "❌ " + e;
+    status.textContent = "Erro";
+    toast("Speed Test: " + e, "error");
+  } finally {
+    speedtestRunning = false;
+    btn.disabled = false;
+    if (unlistenSpeedtest) { unlistenSpeedtest(); unlistenSpeedtest = null; }
+    setTimeout(() => { progressBar.classList.add("hidden"); }, 3000);
+  }
+}
+
 // ─── Report ───
 async function showFullReport() {
   await withLoading("Relatório...", "report", "report-output", async () => {
@@ -817,6 +891,7 @@ document.addEventListener("DOMContentLoaded", () => {
   D("btn-scan").addEventListener("click", showPortScan);
   D("btn-scan-network").addEventListener("click", showNetworkScan);
   D("btn-http").addEventListener("click", showHttpTiming);
+  D("btn-speedtest").addEventListener("click", showSpeedTest);
   D("btn-report").addEventListener("click", showFullReport);
   D("btn-dashboard-report").addEventListener("click", () => {
     document.querySelector('.nav-item[data-view="report"]').click();
